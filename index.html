@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f1419">
+  <title>Sheet Marking Tool</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ============ LOGIN SCREEN ============ -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-box">
+      <h2>🔒 Sheet Marking Tool</h2>
+      <p class="login-sub">Karigar ka tool</p>
+
+      <input
+        type="password"
+        id="password-input"
+        class="login-input"
+        placeholder="Password daalo"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false">
+
+      <button type="button" id="login-btn" class="login-btn">
+        🔓 Login
+      </button>
+
+      <p id="login-error" class="login-error"></p>
+    </div>
+  </div>
+
+  <!-- ============ APP CONTENT ============ -->
+  <div id="app-content" style="display:none;">
+
+    <!-- ============ HEADER ============ -->
+    <header class="app-header">
+      <h1>🔧 Sheet Marking Tool</h1>
+      <p class="app-sub">Karigar ka tool · SS Sheet Metal</p>
+
+      <div class="save-status" id="saveStatus">💾 Not Saved</div>
+
+      <!-- 🐛 Bugs badge — tap karke panel kholo -->
+      <button
+        type="button"
+        id="bugs-toggle"
+        class="bugs-toggle"
+        style="display:none;"
+        title="Errors dekho">
+        🐛 <span id="bugs-count">0</span>
+      </button>
+    </header>
+
+    <!-- ============ TABS ============ -->
+    <nav class="tabs">
+      <button type="button" class="tab active" data-tab="input">📝 Input</button>
+      <button type="button" class="tab" data-tab="view">📐 View</button>
+      <button type="button" class="tab" data-tab="result">✂️ Result</button>
+      <button type="button" class="tab" data-tab="settings">⚙️ Settings</button>
+    </nav>
+
+    <!-- ============ MAIN ============ -->
+    <main>
+
+      <!-- ================= INPUT TAB ================= -->
+      <section id="tab-input" class="tab-content">
+
+        <div class="card">
+          <h2>🏷️ Project Name</h2>
+          <input
+            class="kw-input"
+            id="keyword"
+            type="text"
+            placeholder="box, sink, counter"
+            value="box"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false">
+        </div>
+
+        <div class="card">
+          <h2>📐 Size Entry</h2>
+
+          <div class="side-label">Active Side</div>
+          <div class="side-toggle">
+            <button type="button" class="side-btn active" id="side-len">
+              📏 LENGTH
+            </button>
+            <button type="button" class="side-btn" id="side-dep">
+              📐 DEPTH
+            </button>
+          </div>
+
+          <div class="side-label" style="margin-top:12px;">Current Size</div>
+          <div
+            class="size-display"
+            id="display"
+            role="status"
+            aria-live="polite">0</div>
+
+          <div class="total-display">
+            <span class="total-label">Total:</span>
+            <span class="total-value" id="total-value">0</span>
+          </div>
+
+          <div class="calc-grid" id="calc-grid"></div>
+          <div class="frac-grid" id="frac-grid"></div>
+
+          <div class="action-row">
+            <button type="button" class="btn btn-add" id="btn-add">
+              ➕ +
+            </button>
+            <button type="button" class="btn btn-primary" id="btn-ok">
+              ✓ OK
+            </button>
+            <button type="button" class="btn btn-secondary" id="btn-clear">
+              🗑️
+            </button>
+          </div>
+
+          <div class="auto-hint">
+            Sizes daalo → [➕ +] dabao → [✓ OK] se lines banao
+          </div>
+        </div>
+
+        <!-- ============ EDIT BAR ============ -->
+        <div id="edit-bar" class="edit-bar hidden">
+          <span id="edit-info" class="edit-info">Editing L1</span>
+          <div class="edit-actions">
+            <button type="button" class="btn-edit-save" id="btn-save-edit">
+              ✓ Save
+            </button>
+            <button type="button" class="btn-edit-cancel" id="btn-cancel-edit">
+              ✕ Cancel
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>📋 Marking Lines (Live)</h2>
+
+          <div class="lines-section">
+            <div class="lines-section-title">📏 LENGTH SIDE</div>
+            <div id="len-lines-list" class="lines-list">
+              <div class="empty-small">Abhi koi length line nahi</div>
+            </div>
+          </div>
+
+          <div class="lines-section">
+            <div class="lines-section-title">📐 DEPTH SIDE</div>
+            <div id="dep-lines-list" class="lines-list">
+              <div class="empty-small">Abhi koi depth line nahi</div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ================= VIEW TAB ================= -->
+      <section id="tab-view" class="tab-content hidden">
+
+        <div class="card">
+          <h2>👁️ View Mode</h2>
+          <div class="view-toggle">
+            <button type="button" class="view-btn active" id="view-flat" data-view="flat">
+              📐 FLAT SHEET
+            </button>
+            <button type="button" class="view-btn" id="view-3d" data-view="3d">
+              📦 3D BOX
+            </button>
+          </div>
+        </div>
+
+        <!-- FLAT VIEW -->
+        <div class="card" id="flat-container">
+          <h2>📐 Flat Sheet Marking</h2>
+          <div class="view-hint">
+            🔵 Lines blue · 🔴 Cup cut portion red (click to hide/show)
+          </div>
+          <canvas id="canvasFlat"></canvas>
+
+          <div class="view-controls">
+            <button type="button" class="btn btn-secondary" id="btn-zoom-in">🔍+</button>
+            <button type="button" class="btn btn-secondary" id="btn-zoom-out">🔍−</button>
+            <button type="button" class="btn btn-secondary" id="btn-reset-flat">🔄 Reset</button>
+            <button type="button" class="btn btn-secondary" id="btn-print">🖨️ Print</button>
+          </div>
+
+          <div class="zoom-indicator">
+            Zoom: <span id="zoom-level-flat">1.0x</span>
+          </div>
+
+          <div class="legend">
+            <span class="legend-item">
+              <span class="legend-color blue"></span> Marking lines
+            </span>
+            <span class="legend-item">
+              <span class="legend-color red"></span> Cup cut
+            </span>
+          </div>
+        </div>
+
+        <!-- 3D VIEW -->
+        <div class="card hidden" id="three-container">
+          <h2>📦 3D Box Preview</h2>
+          <div class="view-hint">
+            👆 Drag to rotate 360° · Pinch to zoom
+          </div>
+          <div id="canvas3d" class="canvas-3d"></div>
+
+          <div class="view-controls">
+            <button type="button" class="btn btn-secondary" id="btn-zoom-in-3d">🔍+</button>
+            <button type="button" class="btn btn-secondary" id="btn-zoom-out-3d">🔍−</button>
+            <button type="button" class="btn btn-secondary" id="btn-reset-3d">🔄 Reset</button>
+          </div>
+
+          <div class="view-controls">
+            <button type="button" class="btn btn-secondary" id="btn-wireframe">▦ Wire</button>
+            <button type="button" class="btn btn-secondary" id="btn-auto-rotate">▶ Auto</button>
+          </div>
+
+          <div class="legend">
+            🔵 Sheet · 🔴 Bend lines · ✂️ Cup cuts
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ================= RESULT TAB ================= -->
+      <section id="tab-result" class="tab-content hidden">
+
+        <div class="card">
+          <h2>🧮 Size Totals</h2>
+          <div id="math-result">
+            <div class="empty-hint">Size enter karo.</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>✂️ Bend &amp; Cup Cut (Per Corner)</h2>
+          <div class="info-box">
+            Har corner ka bend deduction, flat length aur cup cut alag hai —
+            angle ke hisaab se nikalta hai.
+          </div>
+          <div id="result-list">
+            <div class="empty-hint">Pehle 2+ lines chahiye.</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>📊 Summary</h2>
+          <div class="result-box">
+            <div class="result-row">
+              <span class="label">Total Length</span>
+              <span class="value" id="sum-len">-</span>
+            </div>
+            <div class="result-row">
+              <span class="label">Total Depth</span>
+              <span class="value" id="sum-dep">-</span>
+            </div>
+            <div class="result-row">
+              <span class="label">Length Lines</span>
+              <span class="value" id="sum-len-lines">-</span>
+            </div>
+            <div class="result-row">
+              <span class="label">Depth Lines</span>
+              <span class="value" id="sum-dep-lines">-</span>
+            </div>
+            <div class="result-row">
+              <span class="label">Total Corners</span>
+              <span class="value" id="sum-corners">-</span>
+            </div>
+            <div class="result-row">
+              <span class="label">Material</span>
+              <span class="value" id="sum-material">-</span>
+            </div>
+            <div class="result-row">
+              <span class="label">Thickness</span>
+              <span class="value" id="sum-thick">-</span>
+            </div>
+            <div class="result-row">
+              <span class="label">V-Die Width</span>
+              <span class="value" id="sum-vdie">-</span>
+            </div>
+            <div class="result-row">
+              <span class="label">Bend Radius</span>
+              <span class="value" id="sum-radius">-</span>
+            </div>
+            <div class="result-row">
+              <span class="label">K-Factor</span>
+              <span class="value" id="sum-kfactor">-</span>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ================= SETTINGS TAB ================= -->
+      <section id="tab-settings" class="tab-content hidden">
+
+        <div class="card">
+          <h2>🔩 Material</h2>
+          <div class="material-row">
+            <button type="button" class="material-btn active" data-material="SS304">
+              SS 304
+            </button>
+            <button type="button" class="material-btn" data-material="SS202">
+              SS 202
+            </button>
+          </div>
+          <div class="info-box">
+            <b>SS 304:</b> K-Factor 0.44<br>
+            <b>SS 202:</b> K-Factor 0.45
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>📏 Sheet Thickness (mm)</h2>
+          <div class="thickness-row">
+            <button type="button" class="thickness-btn" data-thick="0.5">0.5</button>
+            <button type="button" class="thickness-btn active" data-thick="0.8">0.8</button>
+            <button type="button" class="thickness-btn" data-thick="1.0">1.0</button>
+            <button type="button" class="thickness-btn" data-thick="1.2">1.2</button>
+            <button type="button" class="thickness-btn" data-thick="1.5">1.5</button>
+            <button type="button" class="thickness-btn" data-thick="2.0">2.0</button>
+            <button type="button" class="thickness-btn" data-thick="3.0">3.0</button>
+          </div>
+          <input
+            class="custom-input"
+            type="number"
+            inputmode="decimal"
+            id="customThick"
+            placeholder="Custom mm (0.1 - 10)"
+            step="0.1"
+            min="0.1"
+            max="10">
+        </div>
+
+        <div class="card">
+          <h2>⚙️ Advanced Bend Settings</h2>
+          <div class="info-box">
+            Ye default values hain. Workshop mein test karke adjust karo.
+            Save ho jayengi.
+          </div>
+
+          <div class="setting-row">
+            <label for="setVdie">V-Die Width (mm)</label>
+            <input type="number" id="setVdie" class="setting-input"
+              step="0.1" min="0.1" max="100">
+          </div>
+
+          <div class="setting-row">
+            <label for="setRadius">Bend Radius R (mm)</label>
+            <input type="number" id="setRadius" class="setting-input"
+              step="0.01" min="0.01" max="50">
+          </div>
+
+          <div class="setting-row">
+            <label for="setKfactor">K-Factor</label>
+            <input type="number" id="setKfactor" class="setting-input"
+              step="0.01" min="0.1" max="0.5">
+          </div>
+
+          <div class="setting-row">
+            <label for="setSpringback">Springback (°)</label>
+            <input type="number" id="setSpringback" class="setting-input"
+              step="0.1" min="0" max="5">
+          </div>
+
+          <div class="setting-row">
+            <label for="setRelief">Corner Relief (mm)</label>
+            <input type="number" id="setRelief" class="setting-input"
+              step="0.1" min="0" max="20">
+          </div>
+
+          <div class="action-row" style="margin-top:12px;">
+            <button type="button" class="btn btn-secondary" id="btn-reset-settings">
+              🔄 Reset Default
+            </button>
+            <button type="button" class="btn btn-primary" id="btn-save-settings">
+              💾 Save Settings
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>📖 Quick Guide</h2>
+          <div class="info-box">
+            <b>V-Die Width:</b> Press brake ke neeche wala tool.<br>
+            Default: 8 × Thickness<br><br>
+
+            <b>Bend Radius (R):</b> Andar ki taraf ka curve.<br>
+            Default: V / 6.5 ya R = T<br><br>
+
+            <b>K-Factor:</b> Neutral axis position.<br>
+            SS 304 = 0.44, SS 202 = 0.45<br><br>
+
+            <b>Springback:</b> Material wapas aata hai.<br>
+            SS ke liye 0.5° – 1.0° typical<br><br>
+
+            <b>Corner Relief:</b> Corner ka cut size.<br>
+            Default: R + T + 0.5mm
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+
+    <!-- ============ FOOTER ============ -->
+    <footer class="footer-bar">
+      <button type="button" class="btn btn-secondary" id="btn-save">💾 Save</button>
+      <button type="button" class="btn btn-primary" id="btn-calc">⚙️ Calculate</button>
+    </footer>
+
+  </div>
+
+  <!-- ============ BUGS PANEL (Hidden by default) ============ -->
+  <div id="bugs-panel" class="bugs-panel hidden">
+    <div class="bugs-header">
+      <span>🐛 Error Log</span>
+      <button type="button" id="bugs-close" class="bugs-close">✕</button>
+    </div>
+    <div id="bugs-list" class="bugs-list">
+      <div class="empty-hint">✅ Koi error nahi</div>
+    </div>
+    <div class="bugs-footer">
+      <button type="button" id="bugs-clear" class="btn btn-secondary">
+        🗑️ Clear All
+      </button>
+    </div>
+  </div>
+
+  <!-- ============ THREE.JS ============ -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+  <!-- ============ APP JS (order important) ============ -->
+  <script src="js/bugs.js"></script>
+  <script src="js/security.js"></script>
+  <script src="js/sheet.js"></script>
+  <script src="js/flat.js"></script>
+  <script src="js/3d.js"></script>
+  <script src="js/result.js"></script>
+  <script src="js/main.js"></script>
+
+</body>
+</html>
