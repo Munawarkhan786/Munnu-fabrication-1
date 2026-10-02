@@ -1,10 +1,47 @@
-/* =========================================================
-   3D — Powerful Sheet-Metal Simulation (Part 1/2)
-   Setup + Path Building + Sheet Building
+c/* =========================================================
+   3D — REAL SHEET-METAL FOLDING VIEW
+   UPDATED CUP-CUT / SINGLE-SHEET SYSTEM
+   =========================================================
+
+   IMPORTANT:
+
+   1. USER SIZE IS MASTER SIZE
+      --------------------------------
+      User ka entered size exact use hota hai.
+      BD/2 subtract nahi kiya jata.
+
+   2. ONE SHEET
+      --------------------------------
+      lenLines = folding path
+      depLines = sheet width / cross direction
+
+      Dono ko alag-alag sheet nahi banaya jata.
+
+   3. CUP CUT
+      --------------------------------
+      window.cupCutsRemoved === false
+          -> cup-cut marking/gap indicator
+
+      window.cupCutsRemoved === true
+          -> actual visible opening/gap
+
+      Flat.js aur 3D.js same global state use karte hain.
+
+   4. NO YELLOW CORNER SPHERES
+      --------------------------------
+      Old automatic yellow markers removed.
+
+   5. NO AUTOMATIC PILLARS
+      --------------------------------
+      3D sirf actual sheet geometry banata hai.
    ========================================================= */
 
 (function() {
   "use strict";
+
+  /* =========================================================
+     GLOBALS
+     ========================================================= */
 
   var scene = null;
   var camera = null;
@@ -12,39 +49,345 @@
   var meshGroup = null;
   var canvas3dEl = null;
 
-  function getEl(id) { return document.getElementById(id); }
-  function getState() { return window.state; }
-  function getSettings() { return window.settings; }
-  function getView() { return window.view3d; }
+  /* =========================================================
+     HELPERS
+     ========================================================= */
 
-  /* ---------- REAL BEND FORMULAS ---------- */
+  function getEl(id) {
+    return document.getElementById(id);
+  }
+
+  function getState() {
+    return window.state;
+  }
+
+  function getSettings() {
+    return window.settings;
+  }
+
+  function getView() {
+    return window.view3d;
+  }
+
+  /* =========================================================
+     GLOBAL CUP-CUT STATE
+     ========================================================= */
+
+  if (typeof window.cupCutsRemoved !== "boolean") {
+    window.cupCutsRemoved = false;
+  }
+
+  /* =========================================================
+     ENGINEERING FORMULAS
+     ---------------------------------------------------------
+     Kept for reference / bend geometry.
+     IMPORTANT:
+     They are NOT used to reduce user's master size.
+     ========================================================= */
 
   function bendAllowance(theta, R, K, T) {
-    var rad = Math.abs(theta) * Math.PI / 180;
-    return rad * (R + K * T);
+    var rad =
+      Math.abs(theta) *
+      Math.PI /
+      180;
+
+    return rad *
+      (R + K * T);
   }
 
   function outsideSetback(theta, R, T) {
-    var rad = Math.abs(theta) * Math.PI / 180;
-    return (R + T) * Math.tan(rad / 2);
+    var rad =
+      Math.abs(theta) *
+      Math.PI /
+      180;
+
+    return (
+      (R + T) *
+      Math.tan(rad / 2)
+    );
   }
 
   function bendDeduction(theta, R, K, T) {
-    var BA = bendAllowance(theta, R, K, T);
-    var OSSB = outsideSetback(theta, R, T);
-    return (2 * OSSB) - BA;
+    var BA =
+      bendAllowance(
+        theta,
+        R,
+        K,
+        T
+      );
+
+    var OSSB =
+      outsideSetback(
+        theta,
+        R,
+        T
+      );
+
+    return (
+      (2 * OSSB) -
+      BA
+    );
   }
 
-  function neutralAxisRadius(R, K, T) {
-    return R + (K * T);
+  function neutralAxisRadius(
+    R,
+    K,
+    T
+  ) {
+    return R + K * T;
   }
 
-  /* ---------- BUILD FOLDING PATH ---------- */
+  /* =========================================================
+     GET SHEET WIDTH
+     ========================================================= */
+
+  function getSheetWidth() {
+
+    var state = getState();
+
+    if (!state) {
+      return 6;
+    }
+
+    var depLines =
+      state.depLines || [];
+
+    var total = 0;
+
+    depLines.forEach(
+      function(line) {
+        total +=
+          Number(line.size) || 0;
+      }
+    );
+
+    if (total <= 0) {
+      return 6;
+    }
+
+    return total;
+  }
+
+  /* =========================================================
+     GET DEPTH POSITIONS
+     ---------------------------------------------------------
+     These positions correspond to the horizontal bend lines
+     in Flat view.
+
+     Example:
+
+     D1 = 2"
+     D2 = 3"
+     D3 = 2"
+
+     positions:
+
+     0
+     2
+     5
+     7
+     ========================================================= */
+
+  function getDepthBendPositions() {
+
+    var state =
+      getState();
+
+    if (!state) {
+      return [];
+    }
+
+    var depLines =
+      state.depLines || [];
+
+    var result = [];
+
+    var current = 0;
+
+    /*
+     * First position is sheet start.
+     */
+    result.push(0);
+
+    /*
+     * Internal depth bend lines.
+     */
+    for (
+      var i = 0;
+      i < depLines.length - 1;
+      i++
+    ) {
+
+      current +=
+        Number(
+          depLines[i].size
+        ) || 0;
+
+      result.push(current);
+    }
+
+    return result;
+  }
+
+  /* =========================================================
+     GET CUP CUT SIZE
+     ========================================================= */
+
+  function getCupCutSize(
+    lenIndex,
+    depIndex
+  ) {
+
+    var state =
+      getState();
+
+    if (
+      !state ||
+      !state.lenLines ||
+      !state.lenLines[lenIndex - 1] ||
+      !state.lenLines[lenIndex]
+    ) {
+      return 0.5;
+    }
+
+    var A =
+      state.lenLines[
+        lenIndex - 1
+      ];
+
+    var B =
+      state.lenLines[
+        lenIndex
+      ];
+
+    if (
+      !window.Formulas ||
+      typeof window.Formulas.calculateCorner !== "function"
+    ) {
+      return 0.5;
+    }
+
+    var calc =
+      window.Formulas.calculateCorner(
+        Number(A.size) || 0,
+        Number(B.size) || 0,
+        Number(B.angle) || 90
+      );
+
+    if (!calc) {
+      return 0.5;
+    }
+
+    var relief =
+      Number(calc.relief);
+
+    if (
+      !isFinite(relief) ||
+      relief <= 0
+    ) {
+      return 0.5;
+    }
+
+    /*
+     * Internal unit is mm.
+     * Convert to inch because our 3D path uses inch values.
+     */
+    return relief / 25.4;
+  }
+
+  /* =========================================================
+     GET ALL CUP CUT CENTRES FOR ONE BEND
+     ========================================================= */
+
+  function getCupCutsForBend(
+    bendIndex,
+    width
+  ) {
+
+    var state =
+      getState();
+
+    if (
+      !state ||
+      !state.depLines ||
+      state.depLines.length < 2
+    ) {
+      return [];
+    }
+
+    var depLines =
+      state.depLines;
+
+    var positions =
+      getDepthBendPositions();
+
+    var result = [];
+
+    /*
+     * depIndex:
+     *
+     * 1 = first internal depth bend
+     * 2 = second internal depth bend
+     * etc.
+     */
+    for (
+      var d = 1;
+      d < positions.length;
+      d++
+    ) {
+
+      var center =
+        positions[d];
+
+      /*
+       * Do not create a cup beyond sheet width.
+       */
+      if (
+        center <= 0 ||
+        center >= width
+      ) {
+        continue;
+      }
+
+      var cutSize =
+        getCupCutSize(
+          bendIndex,
+          d
+        );
+
+      result.push({
+        center: center,
+        size: cutSize,
+        key:
+          "cup_" +
+          bendIndex +
+          "_" +
+          d
+      });
+    }
+
+    return result;
+  }
+
+  /* =========================================================
+     BUILD FOLDING PATH
+     ---------------------------------------------------------
+     USER SIZE IS USED EXACTLY.
+
+     No:
+       size - BD/2
+       size - BD
+
+     The bend itself is represented by a curved neutral-axis
+     surface.
+     ========================================================= */
 
   function buildBentPath(lines) {
 
     var pts = [];
+
     var angle = 0;
+
     var px = 0;
     var pz = 0;
 
@@ -55,29 +398,69 @@
       type: "start"
     });
 
-    var T = Number(getSettings().thickness) || 0.8;
-    var R = Number(getSettings().radius) || 0.8;
-    var K = Number(getSettings().kfactor) || 0.44;
+    var settings =
+      getSettings();
 
-    for (var i = 0; i < lines.length; i++) {
+    var T =
+      Number(settings.thickness) ||
+      0.8;
 
-      var line = lines[i];
-      var size = Number(line.size) || 0;
-      var bendAngle = Number(line.angle) || 90;
-      var bendDir = line.bend || "up";
+    var R =
+      Number(settings.radius) ||
+      0.8;
 
-      var BD = bendDeduction(bendAngle, R, K, T);
+    var K =
+      Number(settings.kfactor) ||
+      0.44;
 
-      /* Finished flange length
-       * (user size minus half BD on each side) */
-      var flatSize = size;
-      if (i > 0) flatSize -= BD / 2;
-      if (i < lines.length - 1) flatSize -= BD / 2;
-      if (flatSize < 0.1) flatSize = 0.1;
+    for (
+      var i = 0;
+      i < lines.length;
+      i++
+    ) {
 
-      var rad = angle * Math.PI / 180;
-      var nx = px + flatSize * Math.cos(rad);
-      var nz = pz + flatSize * Math.sin(rad);
+      var line =
+        lines[i];
+
+      var size =
+        Number(line.size) || 0;
+
+      var bendAngle =
+        Number(line.angle) || 90;
+
+      var bendDir =
+        line.bend || "up";
+
+      /*
+       * IMPORTANT:
+       *
+       * Exact user master size.
+       *
+       * No BD/2 subtraction.
+       */
+      var flatSize =
+        size;
+
+      if (
+        flatSize <= 0
+      ) {
+        continue;
+      }
+
+      var rad =
+        angle *
+        Math.PI /
+        180;
+
+      var nx =
+        px +
+        flatSize *
+        Math.cos(rad);
+
+      var nz =
+        pz +
+        flatSize *
+        Math.sin(rad);
 
       pts.push({
         x: nx,
@@ -90,24 +473,69 @@
       px = nx;
       pz = nz;
 
-      /* Bend after this flange (except last) */
-      if (i < lines.length - 1) {
+      /*
+       * Bend after this segment.
+       */
+      if (
+        i < lines.length - 1
+      ) {
 
-        var bendSign = (bendDir === "down") ? -1 : 1;
-        var newAngle = angle + bendSign * bendAngle;
+        var bendSign =
+          bendDir === "down"
+            ? -1
+            : 1;
 
-        var neutralR = neutralAxisRadius(R, K, T);
+        var newAngle =
+          angle +
+          bendSign *
+          bendAngle;
 
-        var dirRad = angle * Math.PI / 180;
-        var startRad = dirRad;
-        var endRad = newAngle * Math.PI / 180;
+        var neutralR =
+          neutralAxisRadius(
+            R,
+            K,
+            T
+          );
 
-        /* Bend center */
-        var centerX = px + neutralR * Math.sin(dirRad) * bendSign;
-        var centerZ = pz - neutralR * Math.cos(dirRad) * bendSign;
+        var dirRad =
+          angle *
+          Math.PI /
+          180;
 
-        var endX = centerX - neutralR * Math.sin(endRad) * bendSign;
-        var endZ = centerZ + neutralR * Math.cos(endRad) * bendSign;
+        var startRad =
+          dirRad;
+
+        var endRad =
+          newAngle *
+          Math.PI /
+          180;
+
+        /*
+         * Bend center.
+         */
+        var centerX =
+          px +
+          neutralR *
+          Math.sin(dirRad) *
+          bendSign;
+
+        var centerZ =
+          pz -
+          neutralR *
+          Math.cos(dirRad) *
+          bendSign;
+
+        var endX =
+          centerX -
+          neutralR *
+          Math.sin(endRad) *
+          bendSign;
+
+        var endZ =
+          centerZ +
+          neutralR *
+          Math.cos(endRad) *
+          bendSign;
 
         pts.push({
           x: endX,
@@ -115,262 +543,842 @@
           angle: newAngle,
           type: "bend-end",
           lineIndex: i,
-          bendAngle: bendAngle,
-          bendDir: bendDir,
-          centerX: centerX,
-          centerZ: centerZ,
-          neutralR: neutralR,
-          startRad: startRad,
-          endRad: endRad,
-          bendSign: bendSign
+
+          bendAngle:
+            bendAngle,
+
+          bendDir:
+            bendDir,
+
+          centerX:
+            centerX,
+
+          centerZ:
+            centerZ,
+
+          neutralR:
+            neutralR,
+
+          startRad:
+            startRad,
+
+          endRad:
+            endRad,
+
+          bendSign:
+            bendSign
         });
 
         px = endX;
         pz = endZ;
-        angle = newAngle;
+
+        angle =
+          newAngle;
       }
     }
 
     return pts;
   }
 
-  /* ---------- SETUP 3D SCENE ---------- */
+  /* =========================================================
+     SETUP 3D SCENE
+     ========================================================= */
 
   function setup3D() {
 
-    canvas3dEl = getEl("canvas3d");
-    if (!canvas3dEl) return;
+    canvas3dEl =
+      getEl("canvas3d");
 
-    if (typeof THREE === "undefined") {
-      canvas3dEl.innerHTML =
-        '<div class="empty-hint">3D load nahi hua. Internet check karo.</div>';
+    if (!canvas3dEl) {
       return;
     }
 
-    var W = canvas3dEl.clientWidth || 340;
-    var H = canvas3dEl.clientHeight || 320;
+    if (
+      typeof THREE === "undefined"
+    ) {
 
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0d14);
+      canvas3dEl.innerHTML =
+        '<div class="empty-hint">' +
+        '3D load nahi hua. Internet check karo.' +
+        '</div>';
 
-    camera = new THREE.PerspectiveCamera(45, W / H, 1, 50000);
+      return;
+    }
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.setSize(W, H);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    var W =
+      canvas3dEl.clientWidth ||
+      340;
+
+    var H =
+      canvas3dEl.clientHeight ||
+      320;
+
+    scene =
+      new THREE.Scene();
+
+    scene.background =
+      new THREE.Color(
+        0x0a0d14
+      );
+
+    camera =
+      new THREE.PerspectiveCamera(
+        45,
+        W / H,
+        1,
+        50000
+      );
+
+    renderer =
+      new THREE.WebGLRenderer({
+        antialias: true
+      });
+
+    renderer.setPixelRatio(
+      Math.min(
+        window.devicePixelRatio || 1,
+        2
+      )
+    );
+
+    renderer.setSize(
+      W,
+      H
+    );
+
+    renderer.shadowMap.enabled =
+      true;
+
+    renderer.shadowMap.type =
+      THREE.PCFSoftShadowMap;
 
     canvas3dEl.innerHTML = "";
-    canvas3dEl.appendChild(renderer.domElement);
 
-    /* Lights */
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    canvas3dEl.appendChild(
+      renderer.domElement
+    );
 
-    var keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
-    keyLight.position.set(300, 500, 400);
-    keyLight.castShadow = true;
-    keyLight.shadow.mapSize.width = 1024;
-    keyLight.shadow.mapSize.height = 1024;
-    scene.add(keyLight);
+    /* ---------- LIGHTS ---------- */
 
-    var fillLight = new THREE.DirectionalLight(0x99bbff, 0.4);
-    fillLight.position.set(-300, 200, -300);
-    scene.add(fillLight);
+    scene.add(
+      new THREE.AmbientLight(
+        0xffffff,
+        0.55
+      )
+    );
 
-    var backLight = new THREE.DirectionalLight(0xffaa88, 0.3);
-    backLight.position.set(0, -200, -400);
-    scene.add(backLight);
+    var keyLight =
+      new THREE.DirectionalLight(
+        0xffffff,
+        1.0
+      );
 
-    meshGroup = new THREE.Group();
-    scene.add(meshGroup);
+    keyLight.position.set(
+      300,
+      500,
+      400
+    );
 
-    var grid = new THREE.GridHelper(2000, 40, 0x1a2535, 0x15202e);
-    grid.position.y = -150;
+    keyLight.castShadow =
+      true;
+
+    keyLight.shadow.mapSize.width =
+      1024;
+
+    keyLight.shadow.mapSize.height =
+      1024;
+
+    scene.add(
+      keyLight
+    );
+
+    var fillLight =
+      new THREE.DirectionalLight(
+        0x99bbff,
+        0.4
+      );
+
+    fillLight.position.set(
+      -300,
+      200,
+      -300
+    );
+
+    scene.add(
+      fillLight
+    );
+
+    var backLight =
+      new THREE.DirectionalLight(
+        0xffaa88,
+        0.3
+      );
+
+    backLight.position.set(
+      0,
+      -200,
+      -400
+    );
+
+    scene.add(
+      backLight
+    );
+
+    meshGroup =
+      new THREE.Group();
+
+    scene.add(
+      meshGroup
+    );
+
+    /*
+     * Ground grid.
+     */
+    var grid =
+      new THREE.GridHelper(
+        2000,
+        40,
+        0x1a2535,
+        0x15202e
+      );
+
+    grid.position.y =
+      -150;
+
     scene.add(grid);
 
     updateCamera();
+
     bind3DInteractions();
   }
 
-  /* ---------- UPDATE CAMERA ---------- */
+  /* =========================================================
+     CAMERA
+     ========================================================= */
 
   function updateCamera() {
-    if (!camera) return;
-    var v = getView();
-    var rx = v.rotX * Math.PI / 180;
-    var ry = v.rotY * Math.PI / 180;
 
-    camera.position.x = v.dist * Math.cos(rx) * Math.sin(ry);
-    camera.position.y = v.dist * Math.sin(rx);
-    camera.position.z = v.dist * Math.cos(rx) * Math.cos(ry);
-    camera.lookAt(0, 0, 0);
+    if (!camera) {
+      return;
+    }
+
+    var v =
+      getView();
+
+    var rx =
+      v.rotX *
+      Math.PI /
+      180;
+
+    var ry =
+      v.rotY *
+      Math.PI /
+      180;
+
+    camera.position.x =
+      v.dist *
+      Math.cos(rx) *
+      Math.sin(ry);
+
+    camera.position.y =
+      v.dist *
+      Math.sin(rx);
+
+    camera.position.z =
+      v.dist *
+      Math.cos(rx) *
+      Math.cos(ry);
+
+    camera.lookAt(
+      0,
+      0,
+      0
+    );
   }
 
-  /* ---------- BUILD REAL SHEET FROM LINES ---------- */
+  /* =========================================================
+     MATERIAL
+     ========================================================= */
 
-  function buildSheetFromLines(lines, side) {
+  function createSheetMaterial() {
 
-    if (!lines || lines.length === 0) return;
-
-    var crossTotal;
-    if (side === "len") {
-      crossTotal = getState().depLines.reduce(
-        function(s, l) { return s + Number(l.size); }, 0
-      );
-      if (crossTotal <= 0) crossTotal = 6;
-    } else {
-      crossTotal = getState().lenLines.reduce(
-        function(s, l) { return s + Number(l.size); }, 0
-      );
-      if (crossTotal <= 0) crossTotal = 10;
-    }
-
-    var path = buildBentPath(lines);
-    if (path.length < 2) return;
-
-    /* Center */
-    var sumX = 0, sumZ = 0;
-    for (var i = 0; i < path.length; i++) {
-      sumX += path[i].x;
-      sumZ += path[i].z;
-    }
-    var cx = sumX / path.length;
-    var cz = sumZ / path.length;
-
-    var SCALE = 10;
-
-    var T = Number(getSettings().thickness) || 0.8;
-    var R = Number(getSettings().radius) || 0.8;
-    var K = Number(getSettings().kfactor) || 0.44;
-
-    /* Materials */
-    var mat = new THREE.MeshStandardMaterial({
+    return new THREE.MeshStandardMaterial({
       color: 0xc7cdd4,
       metalness: 0.85,
       roughness: 0.25,
       side: THREE.DoubleSide,
       flatShading: false,
-      wireframe: !!getView().wireframe
+      wireframe:
+        !!getView().wireframe
     });
+  }
 
-    var lineMat = new THREE.LineBasicMaterial({ color: 0xdc2626 });
-    var cutMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24 });
+  /* =========================================================
+     CREATE FLAT SEGMENT WITH CUP CUT GAPS
+     ========================================================= */
 
-    var sheetThick = T * SCALE;
-    if (sheetThick < 1) sheetThick = 1;
+  function createFlatSegment(
+    p1,
+    p2,
+    width,
+    SCALE,
+    cx,
+    cz,
+    yOffset,
+    bendIndex
+  ) {
 
-    var yOffset = side === "dep" ? crossTotal * SCALE * 0.8 : 0;
+    var dx =
+      p2.x -
+      p1.x;
 
-    /* ---------- SEGMENTS ---------- */
-    for (var s = 0; s < path.length - 1; s++) {
+    var dz =
+      p2.z -
+      p1.z;
 
-      var p1 = path[s];
-      var p2 = path[s + 1];
+    var segLen =
+      Math.sqrt(
+        dx * dx +
+        dz * dz
+      );
 
-      /* Flat segment */
-      if (p2.type === "flat-end") {
+    if (
+      segLen <= 0
+    ) {
+      return;
+    }
 
-        var dx = (p2.x - p1.x) * SCALE;
-        var dz = (p2.z - p1.z) * SCALE;
-        var segLen = Math.sqrt(dx * dx + dz * dz);
-        if (segLen < 0.1) continue;
+    var angle =
+      Math.atan2(
+        dz,
+        dx
+      );
 
-        var angleY = Math.atan2(dz, dx);
-        var midX = (p1.x + p2.x) / 2 * SCALE - cx * SCALE;
-        var midZ = (p1.z + p2.z) / 2 * SCALE - cz * SCALE;
+    var midX =
+      (
+        p1.x +
+        p2.x
+      ) / 2;
 
-        var geo = new THREE.BoxGeometry(
-          segLen,
+    var midZ =
+      (
+        p1.z +
+        p2.z
+      ) / 2;
+
+    var sheetThick =
+      (
+        Number(
+          getSettings().thickness
+        ) || 0.8
+      ) * SCALE;
+
+    if (
+      sheetThick < 1
+    ) {
+      sheetThick = 1;
+    }
+
+    var material =
+      createSheetMaterial();
+
+    /*
+     * Normal mode:
+     * complete flat panel.
+     *
+     * Removed mode:
+     * create the panel in width strips around
+     * cup-cut positions.
+     */
+    var cuts =
+      window.cupCutsRemoved
+        ? getCupCutsForBend(
+            bendIndex + 1,
+            width
+          )
+        : [];
+
+    /*
+     * No cup cuts:
+     * one complete box.
+     */
+    if (
+      cuts.length === 0
+    ) {
+
+      var geo =
+        new THREE.BoxGeometry(
+          segLen * SCALE,
           sheetThick,
-          crossTotal * SCALE
+          width * SCALE
         );
 
-        var mesh = new THREE.Mesh(geo, mat);
-        mesh.position.set(midX, yOffset, midZ);
-        mesh.rotation.y = -angleY;
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
+      var mesh =
+        new THREE.Mesh(
+          geo,
+          material
+        );
+
+      mesh.position.set(
+        midX * SCALE -
+          cx * SCALE,
+
+        yOffset,
+
+        midZ * SCALE -
+          cz * SCALE
+      );
+
+      mesh.rotation.y =
+        -angle;
+
+      mesh.castShadow =
+        true;
+
+      mesh.receiveShadow =
+        true;
+
+      meshGroup.add(mesh);
+
+      return;
+    }
+
+    /*
+     * Sort cup cuts by width position.
+     */
+    cuts.sort(
+      function(a, b) {
+        return a.center -
+          b.center;
+      }
+    );
+
+    /*
+     * Build remaining width intervals.
+     *
+     * Coordinate is along sheet width:
+     *
+     * 0 ---------------- width
+     *
+     * cup cut:
+     *       [CUT]
+     *
+     * Remaining:
+     * 0 ----     ---- width
+     */
+    var intervals = [];
+
+    var cursor =
+      0;
+
+    cuts.forEach(
+      function(cut) {
+
+        var half =
+          Math.max(
+            cut.size,
+            0.25
+          ) / 2;
+
+        var left =
+          cut.center -
+          half;
+
+        var right =
+          cut.center +
+          half;
+
+        if (
+          left > cursor
+        ) {
+
+          intervals.push({
+            a: cursor,
+            b: left
+          });
+        }
+
+        cursor =
+          Math.max(
+            cursor,
+            right
+          );
+      }
+    );
+
+    if (
+      cursor < width
+    ) {
+
+      intervals.push({
+        a: cursor,
+        b: width
+      });
+    }
+
+    /*
+     * Safety:
+     * if something goes wrong, keep sheet visible.
+     */
+    if (
+      intervals.length === 0
+    ) {
+      intervals.push({
+        a: 0,
+        b: width
+      });
+    }
+
+    intervals.forEach(
+      function(interval) {
+
+        var intervalWidth =
+          interval.b -
+          interval.a;
+
+        if (
+          intervalWidth <= 0.01
+        ) {
+          return;
+        }
+
+        var intervalCenter =
+          (
+            interval.a +
+            interval.b
+          ) / 2;
+
+        /*
+         * Width in 3D corresponds to Z axis.
+         */
+        var geo =
+          new THREE.BoxGeometry(
+            segLen * SCALE,
+            sheetThick,
+            intervalWidth * SCALE
+          );
+
+        var mesh =
+          new THREE.Mesh(
+            geo,
+            material
+          );
+
+        mesh.position.set(
+          midX * SCALE -
+            cx * SCALE,
+
+          yOffset,
+
+          (
+            midZ * SCALE -
+            cz * SCALE
+          ) +
+            (
+              intervalCenter -
+              width / 2
+            ) * SCALE
+        );
+
+        mesh.rotation.y =
+          -angle;
+
+        mesh.castShadow =
+          true;
+
+        mesh.receiveShadow =
+          true;
 
         meshGroup.add(mesh);
       }
-
-      /* Bend segment */
-      if (p2.type === "bend-end") {
-
-        var bendMesh = createBendSurface(
-          p1, p2, R, K, T, crossTotal * SCALE, SCALE, cx, cz, yOffset
-        );
-
-        if (bendMesh) meshGroup.add(bendMesh);
-
-        /* Red bend line */
-        var halfCross = (crossTotal * SCALE) / 2;
-        var bendX = p2.x * SCALE - cx * SCALE;
-        var bendZ = p2.z * SCALE - cz * SCALE;
-
-        var bendLineGeo = new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(bendX, yOffset, bendZ + halfCross),
-          new THREE.Vector3(bendX, yOffset, bendZ - halfCross)
-        ]);
-        var bendLine = new THREE.Line(bendLineGeo, lineMat);
-        meshGroup.add(bendLine);
-
-        /* Yellow cup cut markers */
-        var cutGeo = new THREE.SphereGeometry(sheetThick * 1.5, 12, 12);
-
-        var cut1 = new THREE.Mesh(cutGeo, cutMat);
-        cut1.position.set(bendX, yOffset + 1, bendZ + halfCross + 3);
-        meshGroup.add(cut1);
-
-        var cut2 = new THREE.Mesh(cutGeo, cutMat);
-        cut2.position.set(bendX, yOffset + 1, bendZ - halfCross - 3);
-        meshGroup.add(cut2);
-      }
-    }
+    );
   }
 
-  /* ---------- CREATE REAL BEND SURFACE (curved) ---------- */
+  /* =========================================================
+     CREATE BEND SURFACE
+     ---------------------------------------------------------
+     IMPORTANT:
 
-  function createBendSurface(p1, p2, R, K, T, width, SCALE, cx, cz, yOffset) {
+     If cupCutsRemoved = TRUE,
+     bend surface is split around cup-cut width locations.
 
-    var segments = 16;
+     This creates real visible gaps instead of yellow dots.
+     ========================================================= */
 
-    var neutralR = neutralAxisRadius(R, K, T);
+  function createBendSurface(
+    p1,
+    p2,
+    R,
+    K,
+    T,
+    width,
+    SCALE,
+    cx,
+    cz,
+    yOffset
+  ) {
 
-    var startRad = p2.startRad;
-    var endRad = p2.endRad;
-    var cX = p2.centerX;
-    var cZ = p2.centerZ;
+    var segments =
+      20;
 
-    var innerR = Math.max(0.01, neutralR - T / 2);
-    var outerR = neutralR + T / 2;
+    var neutralR =
+      neutralAxisRadius(
+        R,
+        K,
+        T
+      );
+
+    var startRad =
+      p2.startRad;
+
+    var endRad =
+      p2.endRad;
+
+    var cX =
+      p2.centerX;
+
+    var cZ =
+      p2.centerZ;
+
+    var innerR =
+      Math.max(
+        0.01,
+        neutralR -
+          T / 2
+      );
+
+    var outerR =
+      neutralR +
+      T / 2;
+
+    /*
+     * Normal = one complete bend.
+     *
+     * Removed = split across width.
+     */
+    var cuts =
+      window.cupCutsRemoved
+        ? getCupCutsForBend(
+            p2.lineIndex + 1,
+            width / SCALE
+          )
+        : [];
+
+    /*
+     * Build width intervals.
+     */
+    var intervals = [];
+
+    if (
+      cuts.length === 0
+    ) {
+
+      intervals.push({
+        a: 0,
+        b: width
+      });
+
+    } else {
+
+      cuts.sort(
+        function(a, b) {
+          return a.center -
+            b.center;
+        }
+      );
+
+      var cursor =
+        0;
+
+      cuts.forEach(
+        function(cut) {
+
+          var half =
+            Math.max(
+              cut.size,
+              0.25
+            ) / 2;
+
+          var left =
+            cut.center -
+            half;
+
+          var right =
+            cut.center +
+            half;
+
+          if (
+            left > cursor
+          ) {
+
+            intervals.push({
+              a: cursor,
+              b: left
+            });
+          }
+
+          cursor =
+            Math.max(
+              cursor,
+              right
+            );
+        }
+      );
+
+      if (
+        cursor <
+        width / SCALE
+      ) {
+
+        intervals.push({
+          a: cursor,
+          b:
+            width / SCALE
+        });
+      }
+    }
+
+    if (
+      intervals.length === 0
+    ) {
+      intervals.push({
+        a: 0,
+        b: width / SCALE
+      });
+    }
+
+    intervals.forEach(
+      function(interval) {
+
+        createBendStrip(
+          startRad,
+          endRad,
+          cX,
+          cZ,
+          innerR,
+          outerR,
+          interval.a,
+          interval.b,
+          SCALE,
+          cx,
+          cz,
+          yOffset
+        );
+      }
+    );
+  }
+
+  /* =========================================================
+     CREATE ONE BEND WIDTH STRIP
+     ========================================================= */
+
+  function createBendStrip(
+    startRad,
+    endRad,
+    cX,
+    cZ,
+    innerR,
+    outerR,
+    widthStart,
+    widthEnd,
+    SCALE,
+    cx,
+    cz,
+    yOffset
+  ) {
+
+    var segments =
+      20;
 
     var positions = [];
     var uvs = [];
     var indices = [];
 
-    var halfWidth = width / 2;
+    var halfWidthStart =
+      widthStart -
+      (
+        widthStart +
+        widthEnd
+      ) / 2;
 
-    for (var i = 0; i <= segments; i++) {
+    var halfWidthEnd =
+      widthEnd -
+      (
+        widthStart +
+        widthEnd
+      ) / 2;
 
-      var t = i / segments;
-      var angle = startRad + (endRad - startRad) * t;
+    for (
+      var i = 0;
+      i <= segments;
+      i++
+    ) {
 
-      var cosA = Math.cos(angle);
-      var sinA = Math.sin(angle);
+      var t =
+        i /
+        segments;
 
-      var ix = cX - innerR * sinA;
-      var iz = cZ + innerR * cosA;
+      var angle =
+        startRad +
+        (
+          endRad -
+          startRad
+        ) * t;
 
-      var ox = cX - outerR * sinA;
-      var oz = cZ + outerR * cosA;
+      var cosA =
+        Math.cos(angle);
 
-      /* 4 vertices */
-      positions.push(ix * SCALE, -halfWidth, -iz * SCALE);
-      positions.push(ox * SCALE, -halfWidth, -oz * SCALE);
-      positions.push(ix * SCALE, halfWidth, -iz * SCALE);
-      positions.push(ox * SCALE, halfWidth, -oz * SCALE);
+      var sinA =
+        Math.sin(angle);
+
+      var ix =
+        cX -
+        innerR *
+        sinA;
+
+      var iz =
+        cZ +
+        innerR *
+        cosA;
+
+      var ox =
+        cX -
+        outerR *
+        sinA;
+
+      var oz =
+        cZ +
+        outerR *
+        cosA;
+
+      /*
+       * Width is local Y in original bend coordinate.
+       *
+       * Convert to 3D Z.
+       */
+      positions.push(
+        ix * SCALE,
+        halfWidthStart * SCALE,
+        -iz * SCALE
+      );
+
+      positions.push(
+        ox * SCALE,
+        halfWidthStart * SCALE,
+        -oz * SCALE
+      );
+
+      positions.push(
+        ix * SCALE,
+        halfWidthEnd * SCALE,
+        -iz * SCALE
+      );
+
+      positions.push(
+        ox * SCALE,
+        halfWidthEnd * SCALE,
+        -oz * SCALE
+      );
 
       uvs.push(t, 0);
       uvs.push(t, 1);
@@ -378,359 +1386,1299 @@
       uvs.push(t, 1);
     }
 
-    for (var s = 0; s < segments; s++) {
-      var a = s * 4;
-      var b = (s + 1) * 4;
+    for (
+      var s = 0;
+      s < segments;
+      s++
+    ) {
 
-      /* Front face */
-      indices.push(a, a + 1, b);
-      indices.push(b, a + 1, b + 1);
+      var a =
+        s * 4;
 
-      /* Back face */
-      indices.push(a + 2, b + 2, a + 3);
-      indices.push(a + 3, b + 2, b + 3);
+      var b =
+        (s + 1) * 4;
+
+      /* Front */
+      indices.push(
+        a,
+        a + 1,
+        b
+      );
+
+      indices.push(
+        b,
+        a + 1,
+        b + 1
+      );
+
+      /* Back */
+      indices.push(
+        a + 2,
+        b + 2,
+        a + 3
+      );
+
+      indices.push(
+        a + 3,
+        b + 2,
+        b + 3
+      );
 
       /* Top */
-      indices.push(a + 1, a + 3, b + 1);
-      indices.push(b + 1, a + 3, b + 3);
+      indices.push(
+        a + 1,
+        a + 3,
+        b + 1
+      );
+
+      indices.push(
+        b + 1,
+        a + 3,
+        b + 3
+      );
 
       /* Bottom */
-      indices.push(a, b, a + 2);
-      indices.push(a + 2, b, b + 2);
+      indices.push(
+        a,
+        b,
+        a + 2
+      );
+
+      indices.push(
+        a + 2,
+        b,
+        b + 2
+      );
     }
 
-    var geometry = new THREE.BufferGeometry();
+    var geometry =
+      new THREE.BufferGeometry();
+
     geometry.setAttribute(
       "position",
-      new THREE.Float32BufferAttribute(positions, 3)
+      new THREE.Float32BufferAttribute(
+        positions,
+        3
+      )
     );
+
     geometry.setAttribute(
       "uv",
-      new THREE.Float32BufferAttribute(uvs, 2)
+      new THREE.Float32BufferAttribute(
+        uvs,
+        2
+      )
     );
-    geometry.setIndex(indices);
+
+    geometry.setIndex(
+      indices
+    );
+
     geometry.computeVertexNormals();
 
-    var material = new THREE.MeshStandardMaterial({
-      color: 0xc7cdd4,
-      metalness: 0.85,
-      roughness: 0.25,
-      side: THREE.DoubleSide,
-      flatShading: false,
-      wireframe: !!getView().wireframe
-    });
+    var material =
+      createSheetMaterial();
 
-    var mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(-cx * SCALE, yOffset, -cz * SCALE);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    var mesh =
+      new THREE.Mesh(
+        geometry,
+        material
+      );
 
-    return mesh;
+    mesh.position.set(
+      -cx * SCALE,
+      yOffset,
+      -cz * SCALE
+    );
+
+    mesh.castShadow =
+      true;
+
+    mesh.receiveShadow =
+      true;
+
+    meshGroup.add(mesh);
   }
 
-  /* ---------- REBUILD 3D ---------- */
+  /* =========================================================
+     BUILD ONE SHEET
+     ========================================================= */
+
+  function buildSheetFromLines(
+    lines
+  ) {
+
+    if (
+      !lines ||
+      lines.length === 0
+    ) {
+      return;
+    }
+
+    var width =
+      getSheetWidth();
+
+    var path =
+      buildBentPath(
+        lines
+      );
+
+    if (
+      path.length < 2
+    ) {
+      return;
+    }
+
+    /* ---------- CENTER ---------- */
+
+    var sumX = 0;
+    var sumZ = 0;
+
+    for (
+      var i = 0;
+      i < path.length;
+      i++
+    ) {
+
+      sumX +=
+        path[i].x;
+
+      sumZ +=
+        path[i].z;
+    }
+
+    var cx =
+      sumX /
+      path.length;
+
+    var cz =
+      sumZ /
+      path.length;
+
+    var SCALE = 10;
+
+    var T =
+      Number(
+        getSettings().thickness
+      ) || 0.8;
+
+    var R =
+      Number(
+        getSettings().radius
+      ) || 0.8;
+
+    var K =
+      Number(
+        getSettings().kfactor
+      ) || 0.44;
+
+    var sheetThick =
+      T * SCALE;
+
+    if (
+      sheetThick < 1
+    ) {
+      sheetThick = 1;
+    }
+
+    /*
+     * One sheet only.
+     */
+    for (
+      var s = 0;
+      s < path.length - 1;
+      s++
+    ) {
+
+      var p1 =
+        path[s];
+
+      var p2 =
+        path[s + 1];
+
+      /* ---------- FLAT SEGMENT ---------- */
+
+      if (
+        p2.type === "flat-end"
+      ) {
+
+        createFlatSegment(
+          p1,
+          p2,
+          width,
+          SCALE,
+          cx,
+          cz,
+          0,
+          p2.lineIndex
+        );
+      }
+
+      /* ---------- BEND ---------- */
+
+      if (
+        p2.type === "bend-end"
+      ) {
+
+        createBendSurface(
+          p1,
+          p2,
+          R,
+          K,
+          T,
+          width * SCALE,
+          SCALE,
+          cx,
+          cz,
+          0
+        );
+      }
+    }
+  }
+
+  /* =========================================================
+     CUP CUT STATUS MARKERS
+     ---------------------------------------------------------
+     No yellow spheres.
+
+     Instead, when cuts are NOT removed,
+     we show small red cut-edge lines matching the
+     actual cup-cut positions.
+
+     These are ONLY visual indicators.
+     When removed = true, geometry gaps are used.
+     ========================================================= */
+
+  function drawCupCutIndicators(
+    lines
+  ) {
+
+    if (
+      window.cupCutsRemoved
+    ) {
+      return;
+    }
+
+    if (
+      !lines ||
+      lines.length < 2
+    ) {
+      return;
+    }
+
+    var width =
+      getSheetWidth();
+
+    var positions =
+      getDepthBendPositions();
+
+    if (
+      positions.length === 0
+    ) {
+      return;
+    }
+
+    var path =
+      buildBentPath(
+        lines
+      );
+
+    var SCALE = 10;
+
+    var sumX = 0;
+    var sumZ = 0;
+
+    path.forEach(
+      function(p) {
+        sumX += p.x;
+        sumZ += p.z;
+      }
+    );
+
+    var cx =
+      sumX /
+      path.length;
+
+    var cz =
+      sumZ /
+      path.length;
+
+    var material =
+      new THREE.LineBasicMaterial({
+        color: 0xdc2626
+      });
+
+    /*
+     * Draw red short indicators on every bend.
+     *
+     * No yellow spheres.
+     */
+    for (
+      var i = 0;
+      i < path.length;
+      i++
+    ) {
+
+      if (
+        path[i].type !==
+        "bend-end"
+      ) {
+        continue;
+      }
+
+      var p =
+        path[i];
+
+      var bendX =
+        p.x * SCALE -
+        cx * SCALE;
+
+      var bendZ =
+        p.z * SCALE -
+        cz * SCALE;
+
+      var cuts =
+        getCupCutsForBend(
+          p.lineIndex + 1,
+          width
+        );
+
+      cuts.forEach(
+        function(cut) {
+
+          var half =
+            Math.max(
+              cut.size,
+              0.25
+            ) *
+            SCALE /
+            2;
+
+          /*
+           * Visual red line along the width.
+           */
+          var z =
+            (
+              cut.center -
+              width / 2
+            ) * SCALE;
+
+          var geo =
+            new THREE.BufferGeometry()
+              .setFromPoints([
+                new THREE.Vector3(
+                  bendX - 2,
+                  2,
+                  bendZ + z - half
+                ),
+                new THREE.Vector3(
+                  bendX - 2,
+                  2,
+                  bendZ + z + half
+                )
+              ]);
+
+          var line =
+            new THREE.Line(
+              geo,
+              material
+            );
+
+          meshGroup.add(
+            line
+          );
+        }
+      );
+    }
+  }
+
+  /* =========================================================
+     REBUILD 3D
+     ========================================================= */
 
   function rebuild3D() {
 
-    if (!meshGroup) return;
+    if (!meshGroup) {
+      return;
+    }
 
-    /* Clear old */
-    while (meshGroup.children.length > 0) {
-      var c = meshGroup.children[0];
-      meshGroup.remove(c);
-      if (c.geometry) c.geometry.dispose();
-      if (c.material) {
-        if (Array.isArray(c.material)) {
-          c.material.forEach(function(m) { if (m) m.dispose(); });
+    /* ---------- CLEAR OLD ---------- */
+
+    while (
+      meshGroup.children.length > 0
+    ) {
+
+      var child =
+        meshGroup.children[0];
+
+      meshGroup.remove(
+        child
+      );
+
+      if (
+        child.geometry
+      ) {
+        child.geometry.dispose();
+      }
+
+      if (
+        child.material
+      ) {
+
+        if (
+          Array.isArray(
+            child.material
+          )
+        ) {
+
+          child.material.forEach(
+            function(m) {
+              if (m) {
+                m.dispose();
+              }
+            }
+          );
+
         } else {
-          c.material.dispose();
+          child.material.dispose();
         }
       }
     }
 
-    var st = getState();
+    var state =
+      getState();
 
-    if (st.lenLines.length === 0 && st.depLines.length === 0) {
-      if (renderer) renderer.render(scene, camera);
+    if (!state) {
       return;
     }
 
-    if (st.lenLines.length > 0) {
-      buildSheetFromLines(st.lenLines, "len");
-    }
-    if (st.depLines.length > 0) {
-      buildSheetFromLines(st.depLines, "dep");
-    }
+    var lenLines =
+      state.lenLines ||
+      [];
 
-    /* Auto camera distance */
-    var maxDist = 0;
-    meshGroup.children.forEach(function(child) {
-      if (child.geometry) {
-        child.geometry.computeBoundingSphere();
-        var r = child.geometry.boundingSphere.radius || 0;
-        var p = child.position;
-        var d = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z) + r;
-        if (d > maxDist) maxDist = d;
+    var depLines =
+      state.depLines ||
+      [];
+
+    /*
+     * IMPORTANT:
+     *
+     * lenLines = actual folding path
+     * depLines = sheet width
+     *
+     * DO NOT build depLines as a second sheet.
+     */
+    if (
+      lenLines.length === 0
+    ) {
+
+      if (
+        renderer
+      ) {
+        renderer.render(
+          scene,
+          camera
+        );
       }
-    });
 
-    if (maxDist > 0) {
-      var v = getView();
-      v.dist = Math.max(400, maxDist * 2.5);
+      return;
+    }
+
+    /*
+     * Build ONE sheet.
+     */
+    buildSheetFromLines(
+      lenLines
+    );
+
+    /*
+     * Add red indicators only when
+     * material has NOT been removed.
+     */
+    drawCupCutIndicators(
+      lenLines
+    );
+
+    /* ---------- CAMERA ---------- */
+
+    var maxDist = 0;
+
+    meshGroup.children.forEach(
+      function(child) {
+
+        if (
+          !child.geometry
+        ) {
+          return;
+        }
+
+        try {
+          child.geometry.computeBoundingSphere();
+        } catch (e) {
+          return;
+        }
+
+        var sphere =
+          child.geometry
+            .boundingSphere;
+
+        if (!sphere) {
+          return;
+        }
+
+        var r =
+          sphere.radius || 0;
+
+        var p =
+          child.position;
+
+        var d =
+          Math.sqrt(
+            p.x * p.x +
+            p.y * p.y +
+            p.z * p.z
+          ) +
+          r;
+
+        if (
+          d > maxDist
+        ) {
+          maxDist = d;
+        }
+      }
+    );
+
+    if (
+      maxDist > 0
+    ) {
+
+      var view =
+        getView();
+
+      view.dist =
+        Math.max(
+          400,
+          maxDist * 2.5
+        );
+
       updateCamera();
     }
 
-    if (renderer) renderer.render(scene, camera);
+    if (
+      renderer
+    ) {
+      renderer.render(
+        scene,
+        camera
+      );
+    }
   }
 
-  /* ---------- DRAW 3D ---------- */
+  /* =========================================================
+     DRAW
+     ========================================================= */
 
   function draw() {
+
     if (!renderer) {
-      if (getEl("canvas3d") && getEl("canvas3d").clientWidth > 0) {
+
+      var canvas =
+        getEl("canvas3d");
+
+      if (
+        canvas &&
+        canvas.clientWidth > 0
+      ) {
         setup3D();
       }
-      if (!renderer) return;
+
+      if (!renderer) {
+        return;
+      }
     }
+
     rebuild3D();
   }
-  /* ---------- 3D INTERACTIONS ---------- */
+
+  /* =========================================================
+     3D INTERACTIONS
+     ========================================================= */
 
   function bind3DInteractions() {
 
-    if (!canvas3dEl) return;
+    if (
+      !canvas3dEl
+    ) {
+      return;
+    }
 
-    var drag = { active: false, x: 0, y: 0, rotX: 0, rotY: 0 };
-    var pinch = { active: false, dist: 0, camDist: 0 };
+    var drag = {
+      active: false,
+      x: 0,
+      y: 0,
+      rotX: 0,
+      rotY: 0
+    };
 
-    function getDist(t1, t2) {
+    var pinch = {
+      active: false,
+      dist: 0,
+      camDist: 0
+    };
+
+    function getDist(
+      t1,
+      t2
+    ) {
+
       return Math.hypot(
-        t1.clientX - t2.clientX,
-        t1.clientY - t2.clientY
+        t1.clientX -
+          t2.clientX,
+
+        t1.clientY -
+          t2.clientY
       );
     }
 
-    /* ----- TOUCH START ----- */
-    canvas3dEl.addEventListener("touchstart", function(e) {
-      if (e.touches.length === 2) {
-        pinch.active = true;
-        pinch.dist = getDist(e.touches[0], e.touches[1]);
-        pinch.camDist = getView().dist;
-      } else if (e.touches.length === 1) {
-        drag.active = true;
-        drag.x = e.touches[0].clientX;
-        drag.y = e.touches[0].clientY;
-        drag.rotX = getView().rotX;
-        drag.rotY = getView().rotY;
+    /* ---------- TOUCH START ---------- */
+
+    canvas3dEl.addEventListener(
+      "touchstart",
+      function(e) {
+
+        if (
+          e.touches.length === 2
+        ) {
+
+          pinch.active =
+            true;
+
+          pinch.dist =
+            getDist(
+              e.touches[0],
+              e.touches[1]
+            );
+
+          pinch.camDist =
+            getView().dist;
+
+        } else if (
+          e.touches.length === 1
+        ) {
+
+          drag.active =
+            true;
+
+          drag.x =
+            e.touches[0].clientX;
+
+          drag.y =
+            e.touches[0].clientY;
+
+          drag.rotX =
+            getView().rotX;
+
+          drag.rotY =
+            getView().rotY;
+        }
+      },
+      {
+        passive: true
       }
-    }, { passive: true });
+    );
 
-    /* ----- TOUCH MOVE ----- */
-    canvas3dEl.addEventListener("touchmove", function(e) {
+    /* ---------- TOUCH MOVE ---------- */
 
-      if (pinch.active && e.touches.length === 2) {
-        e.preventDefault();
-        var d = getDist(e.touches[0], e.touches[1]);
-        var v = getView();
-        v.dist = Math.max(100, Math.min(20000,
-          pinch.camDist * (pinch.dist / d)
-        ));
-        updateCamera();
-        if (renderer) renderer.render(scene, camera);
+    canvas3dEl.addEventListener(
+      "touchmove",
+      function(e) {
 
-      } else if (drag.active && e.touches.length === 1) {
-        e.preventDefault();
+        if (
+          pinch.active &&
+          e.touches.length === 2
+        ) {
 
-        var dx = e.touches[0].clientX - drag.x;
-        var dy = e.touches[0].clientY - drag.y;
+          e.preventDefault();
 
-        var v2 = getView();
-        v2.rotY = drag.rotY + dx * 0.4;
-        v2.rotX = drag.rotX - dy * 0.4;
-        v2.rotX = Math.max(-89, Math.min(89, v2.rotX));
+          var d =
+            getDist(
+              e.touches[0],
+              e.touches[1]
+            );
 
-        updateCamera();
-        if (renderer) renderer.render(scene, camera);
+          if (
+            d <= 0
+          ) {
+            return;
+          }
+
+          var v =
+            getView();
+
+          v.dist =
+            Math.max(
+              100,
+
+              Math.min(
+                20000,
+
+                pinch.camDist *
+                  (
+                    pinch.dist /
+                    d
+                  )
+              )
+            );
+
+          updateCamera();
+
+          if (
+            renderer
+          ) {
+            renderer.render(
+              scene,
+              camera
+            );
+          }
+
+        } else if (
+          drag.active &&
+          e.touches.length === 1
+        ) {
+
+          e.preventDefault();
+
+          var dx =
+            e.touches[0].clientX -
+            drag.x;
+
+          var dy =
+            e.touches[0].clientY -
+            drag.y;
+
+          var v2 =
+            getView();
+
+          v2.rotY =
+            drag.rotY +
+            dx * 0.4;
+
+          v2.rotX =
+            drag.rotX -
+            dy * 0.4;
+
+          v2.rotX =
+            Math.max(
+              -89,
+              Math.min(
+                89,
+                v2.rotX
+              )
+            );
+
+          updateCamera();
+
+          if (
+            renderer
+          ) {
+            renderer.render(
+              scene,
+              camera
+            );
+          }
+        }
+      },
+      {
+        passive: false
       }
-    }, { passive: false });
+    );
 
-    /* ----- TOUCH END ----- */
-    canvas3dEl.addEventListener("touchend", function() {
-      drag.active = false;
-      pinch.active = false;
-    });
+    /* ---------- TOUCH END ---------- */
 
-    /* ----- MOUSE DOWN ----- */
-    canvas3dEl.addEventListener("mousedown", function(e) {
-      drag.active = true;
-      drag.x = e.clientX;
-      drag.y = e.clientY;
-      drag.rotX = getView().rotX;
-      drag.rotY = getView().rotY;
-    });
+    canvas3dEl.addEventListener(
+      "touchend",
+      function() {
 
-    /* ----- MOUSE MOVE ----- */
-    window.addEventListener("mousemove", function(e) {
-      if (!drag.active || !renderer) return;
+        drag.active =
+          false;
 
-      var v = getView();
-      v.rotY = drag.rotY + (e.clientX - drag.x) * 0.4;
-      v.rotX = drag.rotX - (e.clientY - drag.y) * 0.4;
-      v.rotX = Math.max(-89, Math.min(89, v.rotX));
+        pinch.active =
+          false;
+      }
+    );
 
-      updateCamera();
-      renderer.render(scene, camera);
-    });
+    /* ---------- MOUSE DOWN ---------- */
 
-    /* ----- MOUSE UP ----- */
-    window.addEventListener("mouseup", function() {
-      drag.active = false;
-    });
+    canvas3dEl.addEventListener(
+      "mousedown",
+      function(e) {
 
-    /* ----- MOUSE WHEEL ----- */
-    canvas3dEl.addEventListener("wheel", function(e) {
-      e.preventDefault();
-      var v = getView();
-      v.dist = Math.max(100, Math.min(20000, v.dist + e.deltaY * 2));
-      updateCamera();
-      if (renderer) renderer.render(scene, camera);
-    }, { passive: false });
+        drag.active =
+          true;
+
+        drag.x =
+          e.clientX;
+
+        drag.y =
+          e.clientY;
+
+        drag.rotX =
+          getView().rotX;
+
+        drag.rotY =
+          getView().rotY;
+      }
+    );
+
+    /* ---------- MOUSE MOVE ---------- */
+
+    window.addEventListener(
+      "mousemove",
+      function(e) {
+
+        if (
+          !drag.active ||
+          !renderer
+        ) {
+          return;
+        }
+
+        var v =
+          getView();
+
+        v.rotY =
+          drag.rotY +
+          (
+            e.clientX -
+            drag.x
+          ) * 0.4;
+
+        v.rotX =
+          drag.rotX -
+          (
+            e.clientY -
+            drag.y
+          ) * 0.4;
+
+        v.rotX =
+          Math.max(
+            -89,
+            Math.min(
+              89,
+              v.rotX
+            )
+          );
+
+        updateCamera();
+
+        renderer.render(
+          scene,
+          camera
+        );
+      }
+    );
+
+    /* ---------- MOUSE UP ---------- */
+
+    window.addEventListener(
+      "mouseup",
+      function() {
+        drag.active =
+          false;
+      }
+    );
+
+    /* ---------- MOUSE WHEEL ---------- */
+
+    canvas3dEl.addEventListener(
+      "wheel",
+      function(e) {
+
+        e.preventDefault();
+
+        var v =
+          getView();
+
+        v.dist =
+          Math.max(
+            100,
+
+            Math.min(
+              20000,
+
+              v.dist +
+                e.deltaY * 2
+            )
+          );
+
+        updateCamera();
+
+        if (
+          renderer
+        ) {
+          renderer.render(
+            scene,
+            camera
+          );
+        }
+      },
+      {
+        passive: false
+      }
+    );
   }
 
-  /* ---------- ZOOM IN / OUT ---------- */
+  /* =========================================================
+     ZOOM
+     ========================================================= */
 
   function zoomIn3D() {
-    var v = getView();
-    v.dist = Math.max(100, v.dist * 0.8);
+
+    var v =
+      getView();
+
+    v.dist =
+      Math.max(
+        100,
+        v.dist * 0.8
+      );
+
     updateCamera();
-    if (renderer) renderer.render(scene, camera);
+
+    if (
+      renderer
+    ) {
+      renderer.render(
+        scene,
+        camera
+      );
+    }
   }
 
   function zoomOut3D() {
-    var v = getView();
-    v.dist = Math.min(20000, v.dist * 1.25);
+
+    var v =
+      getView();
+
+    v.dist =
+      Math.min(
+        20000,
+        v.dist * 1.25
+      );
+
     updateCamera();
-    if (renderer) renderer.render(scene, camera);
+
+    if (
+      renderer
+    ) {
+      renderer.render(
+        scene,
+        camera
+      );
+    }
   }
 
-  /* ---------- RESET ---------- */
+  /* =========================================================
+     RESET
+     ========================================================= */
 
   function reset3D() {
-    var v = getView();
-    v.rotX = -25;
-    v.rotY = 35;
-    v.dist = 900;
-    v.autoRotate = false;
 
-    var btn = getEl("btn-auto-rotate");
+    var v =
+      getView();
+
+    v.rotX =
+      -25;
+
+    v.rotY =
+      35;
+
+    v.dist =
+      900;
+
+    v.autoRotate =
+      false;
+
+    var btn =
+      getEl(
+        "btn-auto-rotate"
+      );
+
     if (btn) {
-      btn.classList.remove("active");
-      btn.textContent = "▶ Auto";
+
+      btn.classList.remove(
+        "active"
+      );
+
+      btn.textContent =
+        "▶ Auto";
     }
 
     updateCamera();
-    if (renderer) renderer.render(scene, camera);
+
+    if (
+      renderer
+    ) {
+      renderer.render(
+        scene,
+        camera
+      );
+    }
   }
 
-  /* ---------- AUTO ROTATE ---------- */
+  /* =========================================================
+     AUTO ROTATE
+     ========================================================= */
 
   function autoRotateLoop() {
-    var v = getView();
-    if (!v.autoRotate) return;
 
-    v.rotY += 0.4;
+    var v =
+      getView();
+
+    if (
+      !v.autoRotate
+    ) {
+      return;
+    }
+
+    v.rotY +=
+      0.4;
+
     updateCamera();
-    if (renderer) renderer.render(scene, camera);
 
-    requestAnimationFrame(autoRotateLoop);
+    if (
+      renderer
+    ) {
+      renderer.render(
+        scene,
+        camera
+      );
+    }
+
+    requestAnimationFrame(
+      autoRotateLoop
+    );
   }
 
-  /* ---------- WIREFRAME ---------- */
+  /* =========================================================
+     WIREFRAME
+     ========================================================= */
 
   function toggleWireframe() {
-    var v = getView();
-    v.wireframe = !v.wireframe;
 
-    var btn = getEl("btn-wireframe");
-    if (btn) btn.classList.toggle("active", v.wireframe);
+    var v =
+      getView();
+
+    v.wireframe =
+      !v.wireframe;
+
+    var btn =
+      getEl(
+        "btn-wireframe"
+      );
+
+    if (btn) {
+
+      btn.classList.toggle(
+        "active",
+        v.wireframe
+      );
+    }
 
     rebuild3D();
   }
 
-  /* ---------- AUTO ROTATE TOGGLE ---------- */
+  /* =========================================================
+     AUTO ROTATE TOGGLE
+     ========================================================= */
 
   function toggleAutoRotate() {
-    var v = getView();
-    v.autoRotate = !v.autoRotate;
 
-    var btn = getEl("btn-auto-rotate");
+    var v =
+      getView();
+
+    v.autoRotate =
+      !v.autoRotate;
+
+    var btn =
+      getEl(
+        "btn-auto-rotate"
+      );
+
     if (btn) {
-      btn.classList.toggle("active", v.autoRotate);
-      btn.textContent = v.autoRotate ? "⏸ Stop" : "▶ Auto";
+
+      btn.classList.toggle(
+        "active",
+        v.autoRotate
+      );
+
+      btn.textContent =
+        v.autoRotate
+          ? "⏸ Stop"
+          : "▶ Auto";
     }
 
-    if (v.autoRotate) autoRotateLoop();
+    if (
+      v.autoRotate
+    ) {
+      autoRotateLoop();
+    }
   }
 
-  /* ---------- RESIZE ---------- */
+  /* =========================================================
+     RESIZE
+     ========================================================= */
 
   function resize3D() {
-    if (!renderer || !camera || !canvas3dEl) return;
 
-    var W = canvas3dEl.clientWidth;
-    var H = canvas3dEl.clientHeight;
+    if (
+      !renderer ||
+      !camera ||
+      !canvas3dEl
+    ) {
+      return;
+    }
 
-    if (W <= 0 || H <= 0) return;
+    var W =
+      canvas3dEl.clientWidth;
 
-    camera.aspect = W / H;
+    var H =
+      canvas3dEl.clientHeight;
+
+    if (
+      W <= 0 ||
+      H <= 0
+    ) {
+      return;
+    }
+
+    camera.aspect =
+      W / H;
+
     camera.updateProjectionMatrix();
-    renderer.setSize(W, H);
-    renderer.render(scene, camera);
+
+    renderer.setSize(
+      W,
+      H
+    );
+
+    renderer.render(
+      scene,
+      camera
+    );
   }
 
-  /* ---------- BIND BUTTONS ---------- */
+  /* =========================================================
+     BIND BUTTONS
+     ========================================================= */
 
   function bindButtons() {
 
-    var zi = getEl("btn-zoom-in-3d");
-    var zo = getEl("btn-zoom-out-3d");
-    var rs = getEl("btn-reset-3d");
-    var wf = getEl("btn-wireframe");
-    var ar = getEl("btn-auto-rotate");
+    var zi =
+      getEl(
+        "btn-zoom-in-3d"
+      );
 
-    if (zi) zi.onclick = zoomIn3D;
-    if (zo) zo.onclick = zoomOut3D;
-    if (rs) rs.onclick = reset3D;
-    if (wf) wf.onclick = toggleWireframe;
-    if (ar) ar.onclick = toggleAutoRotate;
+    var zo =
+      getEl(
+        "btn-zoom-out-3d"
+      );
 
-    window.addEventListener("resize", function() {
-      resize3D();
-    });
+    var rs =
+      getEl(
+        "btn-reset-3d"
+      );
+
+    var wf =
+      getEl(
+        "btn-wireframe"
+      );
+
+    var ar =
+      getEl(
+        "btn-auto-rotate"
+      );
+
+    if (zi) {
+      zi.onclick =
+        zoomIn3D;
+    }
+
+    if (zo) {
+      zo.onclick =
+        zoomOut3D;
+    }
+
+    if (rs) {
+      rs.onclick =
+        reset3D;
+    }
+
+    if (wf) {
+      wf.onclick =
+        toggleWireframe;
+    }
+
+    if (ar) {
+      ar.onclick =
+        toggleAutoRotate;
+    }
+
+    window.addEventListener(
+      "resize",
+      function() {
+        resize3D();
+      }
+    );
   }
 
-  /* ---------- INIT ---------- */
+  /* =========================================================
+     INIT
+     ========================================================= */
 
   function init() {
 
     bindButtons();
 
-    setTimeout(function() {
-      setup3D();
-      draw();
-    }, 150);
+    setTimeout(
+      function() {
+
+        setup3D();
+
+        draw();
+
+      },
+      150
+    );
   }
 
-  /* ---------- EXPOSE ---------- */
+  /* =========================================================
+     EXPOSE
+     ========================================================= */
 
   window.ThreeD = {
-    init: init,
-    setup: setup3D,
-    draw: draw,
-    reset: reset3D,
-    resize: resize3D,
-    zoomIn: zoomIn3D,
-    zoomOut: zoomOut3D
+
+    init:
+      init,
+
+    setup:
+      setup3D,
+
+    draw:
+      draw,
+
+    reset:
+      reset3D,
+
+    resize:
+      resize3D,
+
+    zoomIn:
+      zoomIn3D,
+
+    zoomOut:
+      zoomOut3D
+
   };
 
 })();
