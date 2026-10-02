@@ -494,3 +494,243 @@
     }
     rebuild3D();
   }
+  /* ---------- 3D INTERACTIONS ---------- */
+
+  function bind3DInteractions() {
+
+    if (!canvas3dEl) return;
+
+    var drag = { active: false, x: 0, y: 0, rotX: 0, rotY: 0 };
+    var pinch = { active: false, dist: 0, camDist: 0 };
+
+    function getDist(t1, t2) {
+      return Math.hypot(
+        t1.clientX - t2.clientX,
+        t1.clientY - t2.clientY
+      );
+    }
+
+    /* ----- TOUCH START ----- */
+    canvas3dEl.addEventListener("touchstart", function(e) {
+      if (e.touches.length === 2) {
+        pinch.active = true;
+        pinch.dist = getDist(e.touches[0], e.touches[1]);
+        pinch.camDist = getView().dist;
+      } else if (e.touches.length === 1) {
+        drag.active = true;
+        drag.x = e.touches[0].clientX;
+        drag.y = e.touches[0].clientY;
+        drag.rotX = getView().rotX;
+        drag.rotY = getView().rotY;
+      }
+    }, { passive: true });
+
+    /* ----- TOUCH MOVE ----- */
+    canvas3dEl.addEventListener("touchmove", function(e) {
+
+      if (pinch.active && e.touches.length === 2) {
+        e.preventDefault();
+        var d = getDist(e.touches[0], e.touches[1]);
+        var v = getView();
+        v.dist = Math.max(100, Math.min(20000,
+          pinch.camDist * (pinch.dist / d)
+        ));
+        updateCamera();
+        if (renderer) renderer.render(scene, camera);
+
+      } else if (drag.active && e.touches.length === 1) {
+        e.preventDefault();
+
+        var dx = e.touches[0].clientX - drag.x;
+        var dy = e.touches[0].clientY - drag.y;
+
+        var v2 = getView();
+        v2.rotY = drag.rotY + dx * 0.4;
+        v2.rotX = drag.rotX - dy * 0.4;
+        v2.rotX = Math.max(-89, Math.min(89, v2.rotX));
+
+        updateCamera();
+        if (renderer) renderer.render(scene, camera);
+      }
+    }, { passive: false });
+
+    /* ----- TOUCH END ----- */
+    canvas3dEl.addEventListener("touchend", function() {
+      drag.active = false;
+      pinch.active = false;
+    });
+
+    /* ----- MOUSE DOWN ----- */
+    canvas3dEl.addEventListener("mousedown", function(e) {
+      drag.active = true;
+      drag.x = e.clientX;
+      drag.y = e.clientY;
+      drag.rotX = getView().rotX;
+      drag.rotY = getView().rotY;
+    });
+
+    /* ----- MOUSE MOVE ----- */
+    window.addEventListener("mousemove", function(e) {
+      if (!drag.active || !renderer) return;
+
+      var v = getView();
+      v.rotY = drag.rotY + (e.clientX - drag.x) * 0.4;
+      v.rotX = drag.rotX - (e.clientY - drag.y) * 0.4;
+      v.rotX = Math.max(-89, Math.min(89, v.rotX));
+
+      updateCamera();
+      renderer.render(scene, camera);
+    });
+
+    /* ----- MOUSE UP ----- */
+    window.addEventListener("mouseup", function() {
+      drag.active = false;
+    });
+
+    /* ----- MOUSE WHEEL ----- */
+    canvas3dEl.addEventListener("wheel", function(e) {
+      e.preventDefault();
+      var v = getView();
+      v.dist = Math.max(100, Math.min(20000, v.dist + e.deltaY * 2));
+      updateCamera();
+      if (renderer) renderer.render(scene, camera);
+    }, { passive: false });
+  }
+
+  /* ---------- ZOOM IN / OUT ---------- */
+
+  function zoomIn3D() {
+    var v = getView();
+    v.dist = Math.max(100, v.dist * 0.8);
+    updateCamera();
+    if (renderer) renderer.render(scene, camera);
+  }
+
+  function zoomOut3D() {
+    var v = getView();
+    v.dist = Math.min(20000, v.dist * 1.25);
+    updateCamera();
+    if (renderer) renderer.render(scene, camera);
+  }
+
+  /* ---------- RESET ---------- */
+
+  function reset3D() {
+    var v = getView();
+    v.rotX = -25;
+    v.rotY = 35;
+    v.dist = 900;
+    v.autoRotate = false;
+
+    var btn = getEl("btn-auto-rotate");
+    if (btn) {
+      btn.classList.remove("active");
+      btn.textContent = "▶ Auto";
+    }
+
+    updateCamera();
+    if (renderer) renderer.render(scene, camera);
+  }
+
+  /* ---------- AUTO ROTATE ---------- */
+
+  function autoRotateLoop() {
+    var v = getView();
+    if (!v.autoRotate) return;
+
+    v.rotY += 0.4;
+    updateCamera();
+    if (renderer) renderer.render(scene, camera);
+
+    requestAnimationFrame(autoRotateLoop);
+  }
+
+  /* ---------- WIREFRAME ---------- */
+
+  function toggleWireframe() {
+    var v = getView();
+    v.wireframe = !v.wireframe;
+
+    var btn = getEl("btn-wireframe");
+    if (btn) btn.classList.toggle("active", v.wireframe);
+
+    rebuild3D();
+  }
+
+  /* ---------- AUTO ROTATE TOGGLE ---------- */
+
+  function toggleAutoRotate() {
+    var v = getView();
+    v.autoRotate = !v.autoRotate;
+
+    var btn = getEl("btn-auto-rotate");
+    if (btn) {
+      btn.classList.toggle("active", v.autoRotate);
+      btn.textContent = v.autoRotate ? "⏸ Stop" : "▶ Auto";
+    }
+
+    if (v.autoRotate) autoRotateLoop();
+  }
+
+  /* ---------- RESIZE ---------- */
+
+  function resize3D() {
+    if (!renderer || !camera || !canvas3dEl) return;
+
+    var W = canvas3dEl.clientWidth;
+    var H = canvas3dEl.clientHeight;
+
+    if (W <= 0 || H <= 0) return;
+
+    camera.aspect = W / H;
+    camera.updateProjectionMatrix();
+    renderer.setSize(W, H);
+    renderer.render(scene, camera);
+  }
+
+  /* ---------- BIND BUTTONS ---------- */
+
+  function bindButtons() {
+
+    var zi = getEl("btn-zoom-in-3d");
+    var zo = getEl("btn-zoom-out-3d");
+    var rs = getEl("btn-reset-3d");
+    var wf = getEl("btn-wireframe");
+    var ar = getEl("btn-auto-rotate");
+
+    if (zi) zi.onclick = zoomIn3D;
+    if (zo) zo.onclick = zoomOut3D;
+    if (rs) rs.onclick = reset3D;
+    if (wf) wf.onclick = toggleWireframe;
+    if (ar) ar.onclick = toggleAutoRotate;
+
+    window.addEventListener("resize", function() {
+      resize3D();
+    });
+  }
+
+  /* ---------- INIT ---------- */
+
+  function init() {
+
+    bindButtons();
+
+    setTimeout(function() {
+      setup3D();
+      draw();
+    }, 150);
+  }
+
+  /* ---------- EXPOSE ---------- */
+
+  window.ThreeD = {
+    init: init,
+    setup: setup3D,
+    draw: draw,
+    reset: reset3D,
+    resize: resize3D,
+    zoomIn: zoomIn3D,
+    zoomOut: zoomOut3D
+  };
+
+})();
