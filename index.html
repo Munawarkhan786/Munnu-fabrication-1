@@ -42,7 +42,6 @@
 
       <div class="save-status" id="saveStatus">💾 Not Saved</div>
 
-      <!-- 🐛 Bugs badge — tap karke panel kholo -->
       <button
         type="button"
         id="bugs-toggle"
@@ -417,7 +416,7 @@
 
   </div>
 
-  <!-- ============ BUGS PANEL (Hidden by default) ============ -->
+  <!-- ============ BUGS PANEL ============ -->
   <div id="bugs-panel" class="bugs-panel hidden">
     <div class="bugs-header">
       <span>🐛 Error Log</span>
@@ -436,13 +435,15 @@
   <!-- ============ THREE.JS ============ -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
-  <!-- ============ APP JS (order important) ============ -->
+  <!-- ============ APP JS (9 files — order important) ============ -->
   <script src="js/bugs.js"></script>
   <script src="js/security.js"></script>
+  <script src="js/core.js"></script>
   <script src="js/sheet.js"></script>
   <script src="js/flat.js"></script>
   <script src="js/3d.js"></script>
   <script src="js/result.js"></script>
+  <script src="js/ui.js"></script>
   <script src="js/main.js"></script>
 
 </body>
