@@ -1,5 +1,5 @@
 /* =========================================================
-   FLAT — 2D Flat Sheet Canvas View
+   FLAT — 2D Flat Sheet Canvas View (Connected to GeometryEngine)
    ========================================================= */
 
 (function() {
@@ -30,14 +30,44 @@
     flatCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  /* ---------- CUP CUT FOR CORNER ---------- */
+  /* ---------- GET GEOMETRY DATA ---------- */
 
-  function getCupCutForCorner(a, b) {
-    var A = getState().lenLines[a - 1];
-    var B = getState().lenLines[a];
-    if (!A || !B) return 0.5;
-    var calc = window.Formulas.calculateCorner(A.size, B.size, B.angle);
-    return calc.relief / 25.4;
+  function getGeometryData() {
+    if (
+      !window.GeometryEngine ||
+      typeof window.GeometryEngine.analyze !== "function"
+    ) {
+      return null;
+    }
+
+    try {
+      return window.GeometryEngine.analyze();
+    } catch (e) {
+      if (window.Bugs) {
+        window.Bugs.log("flat.analyze", e.message, e.stack);
+      }
+      return null;
+    }
+  }
+
+  /*
+    Look up intersection between length line index & depth line index.
+    lenIndex = 0-based index of length BEND (0 = between L1 & L2)
+    depIndex = 0-based index of depth BEND
+  */
+  function findIntersection(data, lenIndex, depIndex) {
+    if (!data || !data.intersections) return null;
+
+    for (var i = 0; i < data.intersections.length; i++) {
+      var item = data.intersections[i];
+      if (
+        item.lenIndex === lenIndex &&
+        item.depIndex === depIndex
+      ) {
+        return item;
+      }
+    }
+    return null;
   }
 
   /* ---------- DRAW FLAT ---------- */
@@ -58,8 +88,9 @@
     flatCtx.fillStyle = "#0a0d14";
     flatCtx.fillRect(0, 0, W, H);
 
-    var lenSizes = getState().lenLines.map(function(l) { return l.size; });
-    var depSizes = getState().depLines.map(function(l) { return l.size; });
+    var state = getState();
+    var lenSizes = state.lenLines.map(function(l) { return l.size; });
+    var depSizes = state.depLines.map(function(l) { return l.size; });
 
     var hasLen = lenSizes.length > 0;
     var hasDep = depSizes.length > 0;
@@ -71,6 +102,10 @@
       flatCtx.fillText("Size daalo pehle", W / 2, H / 2);
       return;
     }
+
+    /* ---------- GET GEOMETRY DATA ---------- */
+
+    var geometryData = getGeometryData();
 
     flatCtx.save();
     flatCtx.translate(window.flatView.panX, window.flatView.panY);
@@ -103,6 +138,8 @@
     flatCtx.strokeRect(startX, startY, drawW, drawH);
     flatCtx.setLineDash([]);
 
+    /* ---------- COMPUTE POSITIONS ---------- */
+
     var lenPositions = [];
     var depPositions = [];
 
@@ -126,30 +163,59 @@
       depPositions.push({ y: y, size: 0, height: 0 });
     }
 
-    /* ---------- VERTICAL LINES ---------- */
-    if (hasLen) {
-      for (var vi = 1; vi < lenPositions.length - 1; vi++) {
-        var vx = lenPositions[vi].x;
+    /*
+      Internal bend lines:
+      lenBends[i] = x position of vertical line (between L(i+1) & L(i+2))
+      depBends[j] = y position of horizontal line (between D(j+1) & D(j+2))
+    */
+    var lenBends = [];
+    for (var lb = 1; lb < lenPositions.length - 1; lb++) {
+      lenBends.push(lenPositions[lb].x);
+    }
 
+    var depBends = [];
+    for (var db = 1; db < depPositions.length - 1; db++) {
+      depBends.push(depPositions[db].y);
+    }
+
+    /* ---------- DRAW VERTICAL LINES (with cuts from geometry) ---------- */
+
+    if (hasLen) {
+      for (var vi = 0; vi < lenBends.length; vi++) {
+        var vx = lenBends[vi];
+
+        /*
+          For this vertical bend line (lenIndex = vi),
+          find all intersection cuts along the depth direction.
+        */
         var vSegments = [];
-        if (hasDep) {
-          for (var vj = 1; vj < depPositions.length - 1; vj++) {
-            var vy = depPositions[vj].y;
-            var cupValV = getCupCutForCorner(vi, vj);
-            var cupPxV = Math.max(cupValV * scale, 8);
+
+        for (var vj = 0; vj < depBends.length; vj++) {
+          var vy = depBends[vj];
+
+          var inter = findIntersection(geometryData, vi, vj);
+
+          /*
+            Only draw a red cut if geometry engine says so.
+          */
+          if (inter && inter.cut && inter.cut.required) {
+            var cupPxV = Math.max(inter.cut.sizeInch * scale, 8);
             var halfV = cupPxV / 2;
+
             vSegments.push({
               y1: vy - halfV,
               y2: vy + halfV,
-              key: "v" + vi + "_" + vj
+              key: inter.id
             });
           }
         }
+
         vSegments.sort(function(a, b) { return a.y1 - b.y1; });
 
         var cursorY = startY;
         var endY = startY + drawH;
 
+        /* Draw blue line segments + red cut segments */
         vSegments.forEach(function(seg) {
           if (seg.y1 > cursorY) {
             flatCtx.strokeStyle = "#3b82f6";
@@ -212,25 +278,35 @@
       }
     }
 
-    /* ---------- HORIZONTAL LINES ---------- */
-    if (hasDep) {
-      for (var hj = 1; hj < depPositions.length - 1; hj++) {
-        var hy = depPositions[hj].y;
+    /* ---------- DRAW HORIZONTAL LINES (with cuts from geometry) ---------- */
 
+    if (hasDep) {
+      for (var hj = 0; hj < depBends.length; hj++) {
+        var hy = depBends[hj];
+
+        /*
+          For this horizontal bend line (depIndex = hj),
+          find all intersection cuts along the length direction.
+        */
         var hSegments = [];
-        if (hasLen) {
-          for (var hi = 1; hi < lenPositions.length - 1; hi++) {
-            var hx = lenPositions[hi].x;
-            var cupValH = getCupCutForCorner(hi, hj);
-            var cupPxH = Math.max(cupValH * scale, 8);
+
+        for (var hi = 0; hi < lenBends.length; hi++) {
+          var hx = lenBends[hi];
+
+          var inter2 = findIntersection(geometryData, hi, hj);
+
+          if (inter2 && inter2.cut && inter2.cut.required) {
+            var cupPxH = Math.max(inter2.cut.sizeInch * scale, 8);
             var halfH = cupPxH / 2;
+
             hSegments.push({
               x1: hx - halfH,
               x2: hx + halfH,
-              key: "v" + hi + "_" + hj
+              key: inter2.id
             });
           }
         }
+
         hSegments.sort(function(a, b) { return a.x1 - b.x1; });
 
         var cursorX = startX;
@@ -304,7 +380,7 @@
     if (zi) zi.textContent = window.flatView.zoom.toFixed(1) + "x";
   }
 
-  /* ---------- TAP HANDLING ---------- */
+  /* ---------- TAP HANDLING (toggle cut visibility) ---------- */
 
   function handleTap(clientX, clientY) {
     var c = getEl("canvasFlat");
@@ -320,8 +396,9 @@
     var availW = W - pad * 2;
     var availH = H - pad * 2;
 
-    var lenSizes = getState().lenLines.map(function(l) { return l.size; });
-    var depSizes = getState().depLines.map(function(l) { return l.size; });
+    var state = getState();
+    var lenSizes = state.lenLines.map(function(l) { return l.size; });
+    var depSizes = state.depLines.map(function(l) { return l.size; });
     var hasLen = lenSizes.length > 0;
     var hasDep = depSizes.length > 0;
     if (!hasLen && !hasDep) return;
@@ -339,6 +416,7 @@
     var startX = pad + (availW - drawW) / 2 + window.flatView.panX;
     var startY = pad + (availH - drawH) / 2 + window.flatView.panY;
 
+    /* Compute bend line positions */
     var lenPos = [];
     var depPos = [];
 
@@ -356,17 +434,32 @@
     }
     depPos.push({ y: y });
 
-    for (var a = 1; a < lenPos.length - 1; a++) {
-      for (var b = 1; b < depPos.length - 1; b++) {
-        var cx = lenPos[a].x;
-        var cy = depPos[b].y;
-        var cupVal = getCupCutForCorner(a, b);
-        var cupPx = Math.max(cupVal * scale, 8);
+    /* Find nearest bend line crossing */
+    var lenBends = [];
+    for (var lb = 1; lb < lenPos.length - 1; lb++) {
+      lenBends.push(lenPos[lb].x);
+    }
+
+    var depBends = [];
+    for (var db = 1; db < depPos.length - 1; db++) {
+      depBends.push(depPos[db].y);
+    }
+
+    var geometryData = getGeometryData();
+
+    for (var a = 0; a < lenBends.length; a++) {
+      for (var b = 0; b < depBends.length; b++) {
+        var cx = lenBends[a];
+        var cy = depBends[b];
+
+        var inter = findIntersection(geometryData, a, b);
+        if (!inter || !inter.cut || !inter.cut.required) continue;
+
+        var cupPx = Math.max(inter.cut.sizeInch * scale, 8);
         var half = cupPx / 2 + 14;
 
         if (Math.abs(mx - cx) < half && Math.abs(my - cy) < half) {
-          var key = "v" + a + "_" + b;
-          window.hiddenCuts[key] = !window.hiddenCuts[key];
+          window.hiddenCuts[inter.id] = !window.hiddenCuts[inter.id];
           draw();
           return;
         }
