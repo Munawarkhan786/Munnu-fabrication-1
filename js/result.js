@@ -1,5 +1,6 @@
 /* =========================================================
-   RESULT — Connected Geometry Calculations
+   RESULT — Sirf GeometryEngine ka result dikhata hai
+   Koi apna hisaab nahi. Sirf display.
    ========================================================= */
 
 (function () {
@@ -9,8 +10,17 @@
     return document.getElementById(id);
   }
 
-  function getState() {
-    return window.state;
+  function fmtInch(v) {
+    if (typeof v !== "number" || !isFinite(v)) return "—";
+    if (typeof window.formatInch === "function") {
+      return window.formatInch(v);
+    }
+    return v.toFixed(3) + '"';
+  }
+
+  function fmt2(v) {
+    if (typeof v !== "number" || !isFinite(v)) return "—";
+    return v.toFixed(2);
   }
 
   /* ---------------------------------------------------------
@@ -18,454 +28,262 @@
      --------------------------------------------------------- */
 
   function render() {
-    renderMath();
-    renderGeometry();
-    renderCorners();
-    renderSummary();
+    var data = null;
+
+    if (window.GeometryEngine && typeof window.GeometryEngine.analyze === "function") {
+      try {
+        data = window.GeometryEngine.analyze();
+      } catch (e) {
+        data = null;
+      }
+    }
+
+    renderMath(data);
+    renderGeometry(data);
+    renderCorners(data);
+    renderSummary(data);
   }
 
   /* ---------------------------------------------------------
-     MATH DISPLAY
+     1. SIZE TOTALS (Math)
      --------------------------------------------------------- */
 
-  function renderMath() {
+  function renderMath(data) {
     var container = getEl("math-result");
-
     if (!container) return;
 
-    var lenSizes =
-      getState().lenLines.map(function (l) {
-        return l.size;
-      });
+    if (!data || !data.input) {
+      container.innerHTML = '<div class="empty-hint">Size enter karo.</div>';
+      return;
+    }
 
-    var depSizes =
-      getState().depLines.map(function (l) {
-        return l.size;
-      });
+    var lenLines = data.input.lengthLines || [];
+    var depLines = data.input.depthLines || [];
 
-    if (
-      lenSizes.length === 0 &&
-      depSizes.length === 0
-    ) {
-      container.innerHTML =
-        '<div class="empty-hint">Size enter karo.</div>';
-
+    if (lenLines.length === 0 && depLines.length === 0) {
+      container.innerHTML = '<div class="empty-hint">Size enter karo.</div>';
       return;
     }
 
     container.innerHTML = "";
 
-    if (lenSizes.length) {
-      var lenBox =
-        document.createElement("div");
+    if (lenLines.length) {
+      var lenSum = 0;
+      var lenExpr = [];
+      lenLines.forEach(function (l) {
+        var s = Number(l.sizeInch) || 0;
+        lenSum += s;
+        lenExpr.push(fmtInch(s));
+      });
 
-      lenBox.className =
-        "result-box";
-
-      var lenSum =
-        lenSizes.reduce(
-          function (a, b) {
-            return a + b;
-          },
-          0
-        );
-
+      var lenBox = document.createElement("div");
+      lenBox.className = "result-box";
       lenBox.innerHTML =
         '<div class="corner-title">📏 Length</div>' +
-        '<div class="math-expression">' +
-        lenSizes
-          .map(window.formatInch)
-          .join(" + ") +
-        "</div>" +
-        '<div class="math-total">= ' +
-        window.formatInch(lenSum) +
-        "</div>";
-
+        '<div class="math-expression">' + lenExpr.join(" + ") + '</div>' +
+        '<div class="math-total">= ' + fmtInch(lenSum) + '</div>';
       container.appendChild(lenBox);
     }
 
-    if (depSizes.length) {
-      var depBox =
-        document.createElement("div");
+    if (depLines.length) {
+      var depSum = 0;
+      var depExpr = [];
+      depLines.forEach(function (l) {
+        var s = Number(l.sizeInch) || 0;
+        depSum += s;
+        depExpr.push(fmtInch(s));
+      });
 
-      depBox.className =
-        "result-box";
-
-      var depSum =
-        depSizes.reduce(
-          function (a, b) {
-            return a + b;
-          },
-          0
-        );
-
+      var depBox = document.createElement("div");
+      depBox.className = "result-box";
       depBox.innerHTML =
         '<div class="corner-title">📐 Depth</div>' +
-        '<div class="math-expression">' +
-        depSizes
-          .map(window.formatInch)
-          .join(" + ") +
-        "</div>" +
-        '<div class="math-total">= ' +
-        window.formatInch(depSum) +
-        "</div>";
-
+        '<div class="math-expression">' + depExpr.join(" + ") + '</div>' +
+        '<div class="math-total">= ' + fmtInch(depSum) + '</div>';
       container.appendChild(depBox);
     }
   }
 
   /* ---------------------------------------------------------
-     GEOMETRY SUMMARY
+     2. GEOMETRY SUMMARY
      --------------------------------------------------------- */
 
-  function renderGeometry() {
-    var container =
-      getEl("geometry-result");
+  function renderGeometry(data) {
+    var container = getEl("geometry-result");
+    if (!container) return;
 
-    /*
-      Optional container.
-      Existing HTML does not have to contain it.
-    */
-    if (!container) {
+    if (!data) {
+      container.innerHTML = '<div class="empty-hint">Geometry Engine load nahi hua.</div>';
       return;
     }
 
-    if (
-      !window.GeometryEngine ||
-      !window.GeometryEngine.analyze
-    ) {
-      container.innerHTML =
-        '<div class="empty-hint">' +
-        "Geometry Engine load nahi hua." +
-        "</div>";
-
-      return;
-    }
-
-    var data =
-      window.GeometryEngine.analyze();
+    var s = data.statistics || {};
 
     container.innerHTML = "";
 
-    var box =
-      document.createElement("div");
-
-    box.className =
-      "result-box";
-
-    var cutCount =
-      data.statistics.cutCount;
-
-    var noCutCount =
-      data.statistics.noCutCount;
-
+    var box = document.createElement("div");
+    box.className = "result-box";
     box.innerHTML =
-      '<div class="corner-title">' +
-      "⚙️ Connected Geometry" +
-      "</div>" +
+      '<div class="corner-title">⚙️ Connected Geometry</div>' +
 
       '<div class="result-row">' +
       '<span class="label">Length bends</span>' +
-      '<span class="value">' +
-      data.length.segments.length +
-      "</span>" +
-      "</div>" +
+      '<span class="value">' + (s.totalLengthLines || 0) + '</span>' +
+      '</div>' +
 
       '<div class="result-row">' +
       '<span class="label">Depth bends</span>' +
-      '<span class="value">' +
-      data.depth.segments.length +
-      "</span>" +
-      "</div>" +
+      '<span class="value">' + (s.totalDepthLines || 0) + '</span>' +
+      '</div>' +
 
       '<div class="result-row">' +
       '<span class="label">Intersections checked</span>' +
-      '<span class="value">' +
-      data.statistics.totalIntersections +
-      "</span>" +
-      "</div>" +
+      '<span class="value">' + (s.totalIntersections || 0) + '</span>' +
+      '</div>' +
 
       '<div class="result-row">' +
       '<span class="label">Automatic cuts</span>' +
-      '<span class="value red">' +
-      cutCount +
-      "</span>" +
-      "</div>" +
+      '<span class="value red">' + (s.cutCount || 0) + '</span>' +
+      '</div>' +
 
       '<div class="result-row">' +
       '<span class="label">No-cut corners</span>' +
-      '<span class="value green">' +
-      noCutCount +
-      "</span>" +
-      "</div>";
+      '<span class="value green">' + (s.noCutCount || 0) + '</span>' +
+      '</div>';
 
     container.appendChild(box);
   }
 
   /* ---------------------------------------------------------
-     CORNER / INTERSECTION CARDS
+     3. CORNER CARDS (har intersection)
      --------------------------------------------------------- */
 
-  function renderCorners() {
-    var container =
-      getEl("result-list");
-
+  function renderCorners(data) {
+    var container = getEl("result-list");
     if (!container) return;
 
     container.innerHTML = "";
 
-    if (
-      !window.GeometryEngine ||
-      !window.GeometryEngine.analyze
-    ) {
-      container.innerHTML =
-        '<div class="empty-hint">' +
-        "Geometry Engine available nahi hai." +
-        "</div>";
-
+    if (!data || !data.intersections) {
+      container.innerHTML = '<div class="empty-hint">Geometry Engine available nahi hai.</div>';
       return;
     }
 
-    var data =
-      window.GeometryEngine.analyze();
-
-    var intersections =
-      data.intersections;
-
+    var intersections = data.intersections;
     if (!intersections.length) {
-      container.innerHTML =
-        '<div class="empty-hint">' +
-        "Length + Depth lines enter karo." +
-        "</div>";
-
+      container.innerHTML = '<div class="empty-hint">Length + Depth lines enter karo.</div>';
       return;
     }
 
-    intersections.forEach(
-      function (item) {
-        container.appendChild(
-          makeIntersectionCard(item)
-        );
-      }
-    );
+    intersections.forEach(function (item) {
+      container.appendChild(makeCornerCard(item));
+    });
   }
 
   /* ---------------------------------------------------------
-     INTERSECTION CARD
+     CORNER CARD — poora pura data
      --------------------------------------------------------- */
 
-  function makeIntersectionCard(item) {
-    var box =
-      document.createElement("div");
+  function makeCornerCard(item) {
+    var box = document.createElement("div");
+    box.className = "result-box";
 
-    box.className =
-      "result-box";
+    var lb = item.lengthBend || {};
+    var db = item.depthBend || {};
+    var inter = item.interaction || {};
+    var cut = item.cut || { required: false };
 
-    var cutClass =
-      item.cut.required
-        ? "red"
-        : "green";
+    var cutClass = cut.required ? "red" : "green";
+    var cutText = cut.required ? "AUTO CUT REQUIRED" : "NO CUT";
 
-    var cutText =
-      item.cut.required
-        ? "AUTO CUT REQUIRED"
-        : "NO CUT";
+    var cutSize = "—";
+    if (cut.required) {
+      cutSize =
+        fmtInch(cut.widthIn) + " × " + fmtInch(cut.depthIn) +
+        " (" + fmt2(cut.widthMm) + " × " + fmt2(cut.depthMm) + " mm)";
+    }
 
-    var cutSize =
-      item.cut.required
-        ? window.formatInch(
-            item.cut.sizeInch
-          ) +
-          " (" +
-          item.cut.sizeMm.toFixed(2) +
-          " mm)"
-        : "—";
+    var html = "";
+    html += '<div class="corner-title">✂️ ' + (item.id || "—") + '</div>';
 
-    box.innerHTML =
-      '<div class="corner-title">' +
-      "✂️ " +
-      item.id +
-      "</div>" +
+    html += row("Length Bend",
+      (lb.angleDeg || "—") + "° " + (lb.direction || ""));
+    html += row("Depth Bend",
+      (db.angleDeg || "—") + "° " + (db.direction || ""));
 
-      '<div class="result-row">' +
-      '<span class="label">Length Bend</span>' +
-      '<span class="value">' +
-      item.lengthBend.angle +
-      "° " +
-      item.lengthBend.direction +
-      "</span>" +
-      "</div>" +
+    html += row("Length Sequence", lb.sequence || "—");
+    html += row("Depth Sequence", db.sequence || "—");
 
-      '<div class="result-row">' +
-      '<span class="label">Depth Bend</span>' +
-      '<span class="value">' +
-      item.depthBend.angle +
-      "° " +
-      item.depthBend.direction +
-      "</span>" +
-      "</div>" +
+    html += row("Length Size", fmtInch(lb.sizeInch));
+    html += row("Depth Size", fmtInch(db.sizeInch));
 
-      '<div class="result-row">' +
-      '<span class="label">Length Sequence</span>' +
-      '<span class="value">' +
-      item.lengthBend.sequence +
-      "</span>" +
-      "</div>" +
+    html += row("Length BD",
+      fmt2(lb.bendDeduction && lb.bendDeduction.bendDeductionMm) + " mm");
+    html += row("Depth BD",
+      fmt2(db.bendDeduction && db.bendDeduction.bendDeductionMm) + " mm");
 
-      '<div class="result-row">' +
-      '<span class="label">Depth Sequence</span>' +
-      '<span class="value">' +
-      item.depthBend.sequence +
-      "</span>" +
-      "</div>" +
+    html += row("Direction Relation", inter.directionRelation || "—");
+    html += row("Direction Angle", fmt2(inter.directionAngleDeg) + "°");
+    html += row("Movement", fmt2(inter.movementStrength));
 
-      '<div class="result-row">' +
-      '<span class="label">Length Movement</span>' +
-      '<span class="value">' +
-      item.lengthBend.movement +
-      "</span>" +
-      "</div>" +
+    html += row("Interference",
+      '<span class="' + cutClass + '">' +
+      (item.interference ? "YES" : "NO") + '</span>');
 
-      '<div class="result-row">' +
-      '<span class="label">Depth Movement</span>' +
-      '<span class="value">' +
-      item.depthBend.movement +
-      "</span>" +
-      "</div>" +
+    html += row("Automatic Cut",
+      '<span class="' + cutClass + '">' + cutText + '</span>');
 
-      '<div class="result-row">' +
-      '<span class="label">Direction Difference</span>' +
-      '<span class="value">' +
-      item.geometry.directionAngle.toFixed(2) +
-      "°</span>" +
-      "</div>" +
+    html += row("Cut Size",
+      '<span class="' + cutClass + '">' + cutSize + '</span>');
 
-      '<div class="result-row">' +
-      '<span class="label">Interference</span>' +
-      '<span class="value ' +
-      cutClass +
-      '">' +
-      (item.interference
-        ? "YES"
-        : "NO") +
-      "</span>" +
-      "</div>" +
-
-      '<div class="result-row">' +
-      '<span class="label">Automatic Cut</span>' +
-      '<span class="value ' +
-      cutClass +
-      '">' +
-      cutText +
-      "</span>" +
-      "</div>" +
-
-      '<div class="result-row">' +
-      '<span class="label">Cut Size</span>' +
-      '<span class="value ' +
-      cutClass +
-      '">' +
-      cutSize +
-      "</span>" +
-      "</div>";
-
+    box.innerHTML = html;
     return box;
+
+    function row(label, value) {
+      return '<div class="result-row">' +
+        '<span class="label">' + label + '</span>' +
+        '<span class="value">' + value + '</span>' +
+        '</div>';
+    }
   }
 
   /* ---------------------------------------------------------
-     SUMMARY
+     4. SUMMARY (left column ke saare values)
      --------------------------------------------------------- */
 
-  function renderSummary() {
-    var lenSum =
-      getState().lenLines.reduce(
-        function (s, l) {
-          return s + l.size;
-        },
-        0
-      );
+  function renderSummary(data) {
+    var settings = window.settings || {};
 
-    var depSum =
-      getState().depLines.reduce(
-        function (s, l) {
-          return s + l.size;
-        },
-        0
-      );
+    var lenLines = (data && data.input && data.input.lengthLines) || [];
+    var depLines = (data && data.input && data.input.depthLines) || [];
 
-    setText(
-      "sum-len",
-      getState().lenLines.length
-        ? window.formatInch(lenSum)
-        : "-"
-    );
+    var lenSum = 0;
+    lenLines.forEach(function (l) { lenSum += Number(l.sizeInch) || 0; });
 
-    setText(
-      "sum-dep",
-      getState().depLines.length
-        ? window.formatInch(depSum)
-        : "-"
-    );
+    var depSum = 0;
+    depLines.forEach(function (l) { depSum += Number(l.sizeInch) || 0; });
 
-    setText(
-      "sum-len-lines",
-      getState().lenLines.length
-    );
+    setText("sum-len", lenLines.length ? fmtInch(lenSum) : "-");
+    setText("sum-dep", depLines.length ? fmtInch(depSum) : "-");
+    setText("sum-len-lines", lenLines.length);
+    setText("sum-dep-lines", depLines.length);
 
-    setText(
-      "sum-dep-lines",
-      getState().depLines.length
-    );
+    setText("sum-corners",
+      Math.max(0, lenLines.length - 1) +
+      Math.max(0, depLines.length - 1));
 
-    setText(
-      "sum-corners",
-      Math.max(
-        0,
-        getState().lenLines.length - 1
-      ) +
-      Math.max(
-        0,
-        getState().depLines.length - 1
-      )
-    );
+    setText("sum-material",
+      settings.material === "SS304" ? "SS 304" : "SS 202");
 
-    setText(
-      "sum-material",
-      window.settings.material === "SS304"
-        ? "SS 304"
-        : "SS 202"
-    );
-
-    setText(
-      "sum-thick",
-      window.settings.thickness +
-      " mm"
-    );
-
-    setText(
-      "sum-vdie",
-      window.settings.vdie +
-      " mm"
-    );
-
-    setText(
-      "sum-radius",
-      window.settings.radius +
-      " mm"
-    );
-
-    setText(
-      "sum-kfactor",
-      window.settings.kfactor
-    );
+    setText("sum-thick", (settings.thickness || 0) + " mm");
+    setText("sum-vdie", (settings.vdie || 0) + " mm");
+    setText("sum-radius", (settings.radius || 0) + " mm");
+    setText("sum-kfactor", settings.kfactor || 0);
   }
 
   function setText(id, value) {
     var e = getEl(id);
-
-    if (e) {
-      e.textContent = value;
-    }
+    if (e) e.textContent = value;
   }
 
   /* ---------------------------------------------------------
