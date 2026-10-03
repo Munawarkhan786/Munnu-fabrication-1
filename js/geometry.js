@@ -1,97 +1,100 @@
 /* =========================================================
-   GEOMETRY ENGINE
-   Connected Bend / Direction / Sequence / Interference
+   GEOMETRY ENGINE V3
+   MUNNU FABRICATION / SHEET METAL
+
+   COMPLETE DATA MODEL
+
+   LENGTH:
+     L1 → L2 → L3 → ...
+
+   DEPTH:
+     D1 → D2 → D3 → ...
+
+   Every line contains:
+     size
+     angle
+     UP / DOWN
+     position
+     sequence
+
+   ENGINE FLOW:
+
+     USER DATA
+        ↓
+     COMPLETE BEND NETWORK
+        ↓
+     BEND ALLOWANCE
+     BEND DEDUCTION
+     SPRINGBACK
+     RADIUS
+     THICKNESS
+        ↓
+     3D BEND PATH
+        ↓
+     BEND INTERACTION
+        ↓
+     MATERIAL INTERFERENCE
+        ↓
+     NOTCH / RELIEF GEOMETRY
+        ↓
+     FINAL FLAT DATA
+
+   No external geometry library.
    ========================================================= */
 
 (function () {
   "use strict";
 
-  /*
-    IMPORTANT
-    ---------------------------------------------------------
-    This module does NOT replace user dimensions.
-
-    It calculates:
-      1. bend direction
-      2. bend angle
-      3. bend sequence
-      4. sheet thickness
-      5. bend radius
-      6. connected material position
-      7. material movement direction
-      8. possible bend-path interference
-      9. automatic relief/notch requirement
-
-    Flat / 3D / Result should all read from this engine.
-  */
-
   var EPS = 0.000001;
 
-  /* ---------------------------------------------------------
-     BASIC HELPERS
-     --------------------------------------------------------- */
+  /* =========================================================
+     BASIC MATH
+     ========================================================= */
 
   function num(v, fallback) {
     var n = Number(v);
-    return Number.isFinite(n) ? n : (fallback || 0);
+    return Number.isFinite(n)
+      ? n
+      : (fallback || 0);
   }
 
   function clamp(v, min, max) {
-    return Math.max(min, Math.min(max, v));
+    return Math.max(
+      min,
+      Math.min(max, v)
+    );
   }
 
-  function degToRad(deg) {
-    return deg * Math.PI / 180;
+  function degToRad(v) {
+    return v * Math.PI / 180;
   }
 
-  function radToDeg(rad) {
-    return rad * 180 / Math.PI;
+  function radToDeg(v) {
+    return v * 180 / Math.PI;
   }
 
   function round(v, digits) {
-    var p = Math.pow(10, digits || 6);
+    var p = Math.pow(
+      10,
+      digits || 0
+    );
+
     return Math.round(v * p) / p;
   }
 
   function inchToMm(v) {
-    return num(v) * 25.4;
+    return num(v, 0) * 25.4;
   }
 
   function mmToInch(v) {
-    return num(v) / 25.4;
+    return num(v, 0) / 25.4;
   }
 
-  function normalize(v) {
-    var len = Math.sqrt(
-      v.x * v.x +
-      v.y * v.y +
-      v.z * v.z
-    );
-
-    if (len < EPS) {
-      return { x: 0, y: 0, z: 0 };
-    }
-
+  function vec(x, y, z) {
     return {
-      x: v.x / len,
-      y: v.y / len,
-      z: v.z / len
-    };
-  }
-
-  function dot(a, b) {
-    return (
-      a.x * b.x +
-      a.y * b.y +
-      a.z * b.z
-    );
-  }
-
-  function cross(a, b) {
-    return {
-      x: a.y * b.z - a.z * b.y,
-      y: a.z * b.x - a.x * b.z,
-      z: a.x * b.y - a.y * b.x
+      x: x || 0,
+      y: y || 0,
+      z: z || 0
     };
   }
 
@@ -119,825 +122,1823 @@
     };
   }
 
-  function distance(a, b) {
-    var d = sub(a, b);
-    return Math.sqrt(dot(d, d));
+  function dot(a, b) {
+    return (
+      a.x * b.x +
+      a.y * b.y +
+      a.z * b.z
+    );
   }
 
-  /* ---------------------------------------------------------
-     LINEAR INTERPOLATION
-     --------------------------------------------------------- */
+  function cross(a, b) {
+    return {
+      x:
+        a.y * b.z -
+        a.z * b.y,
+
+      y:
+        a.z * b.x -
+        a.x * b.z,
+
+      z:
+        a.x * b.y -
+        a.y * b.x
+    };
+  }
+
+  function length(v) {
+    return Math.sqrt(
+      v.x * v.x +
+      v.y * v.y +
+      v.z * v.z
+    );
+  }
+
+  function normalize(v) {
+    var len = length(v);
+
+    if (len < EPS) {
+      return vec(0, 0, 0);
+    }
+
+    return {
+      x: v.x / len,
+      y: v.y / len,
+      z: v.z / len
+    };
+  }
+
+  function distance(a, b) {
+    return length(
+      sub(a, b)
+    );
+  }
 
   function lerp(a, b, t) {
     return {
-      x: a.x + (b.x - a.x) * t,
-      y: a.y + (b.y - a.y) * t,
-      z: a.z + (b.z - a.z) * t
+      x:
+        a.x +
+        (b.x - a.x) * t,
+
+      y:
+        a.y +
+        (b.y - a.y) * t,
+
+      z:
+        a.z +
+        (b.z - a.z) * t
     };
   }
 
-  /* ---------------------------------------------------------
-     ROTATION AROUND AXIS
-     --------------------------------------------------------- */
+  /* =========================================================
+     ROTATE VECTOR AROUND AXIS
+     ========================================================= */
 
-  function rotateAroundAxis(point, origin, axis, angleRad) {
-    var p = sub(point, origin);
-    var u = normalize(axis);
+  function rotateVector(
+    vector,
+    axis,
+    angle
+  ) {
+    var v = vector;
+    var k = normalize(axis);
 
-    var cos = Math.cos(angleRad);
-    var sin = Math.sin(angleRad);
+    var c = Math.cos(angle);
+    var s = Math.sin(angle);
 
-    var term1 = mul(p, cos);
-    var term2 = mul(cross(u, p), sin);
-    var term3 = mul(
-      u,
-      dot(u, p) * (1 - cos)
-    );
+    var term1 =
+      mul(v, c);
+
+    var term2 =
+      mul(
+        cross(k, v),
+        s
+      );
+
+    var term3 =
+      mul(
+        k,
+        dot(k, v) *
+          (1 - c)
+      );
 
     return add(
-      origin,
-      add(
-        add(term1, term2),
-        term3
-      )
+      add(term1, term2),
+      term3
     );
   }
 
-  /* ---------------------------------------------------------
-     LINE ROTATION
-     --------------------------------------------------------- */
-
-  function rotateDirection(direction, axis, angleRad) {
-    return normalize(
-      sub(
-        rotateAroundAxis(
-          direction,
-          { x: 0, y: 0, z: 0 },
-          axis,
-          angleRad
-        ),
-        { x: 0, y: 0, z: 0 }
-      )
-    );
-  }
-
-  /* ---------------------------------------------------------
+  /* =========================================================
      SETTINGS
-     --------------------------------------------------------- */
+     ========================================================= */
 
   function getSettings() {
-    var s = window.settings || {};
+    var s =
+      window.settings || {};
 
     return {
-      thicknessMm: num(s.thickness, 0.8),
-      radiusMm: num(s.radius, 0.8),
-      kFactor: num(s.kfactor, 0.44),
-      springback: num(s.springback, 0.5)
+      thicknessMm:
+        num(
+          s.thickness,
+          0.8
+        ),
+
+      radiusMm:
+        num(
+          s.radius,
+          0.8
+        ),
+
+      kFactor:
+        clamp(
+          num(
+            s.kfactor,
+            0.44
+          ),
+          0,
+          1
+        ),
+
+      springback:
+        num(
+          s.springback,
+          0.5
+        ),
+
+      reliefMm:
+        num(
+          s.relief,
+          1.6
+        )
     };
   }
 
-  /* ---------------------------------------------------------
-     BEND INFORMATION
-     --------------------------------------------------------- */
+  /* =========================================================
+     NORMALIZE LINE DATA
+     ========================================================= */
 
-  function getBendAngle(line) {
-    var angle = num(
-      line && line.angle,
-      90
-    );
+  function normalizeAngle(line) {
+    var a =
+      num(
+        line && line.angle,
+        90
+      );
 
-    if (angle <= 0) {
-      angle = 90;
+    if (a <= 0) {
+      a = 90;
     }
 
-    return angle;
+    return a;
   }
 
-  function getBendDirection(line) {
+  function normalizeBend(line) {
     return (
-      line &&
-      String(line.bend).toLowerCase() === "down"
-    ) ? "DOWN" : "UP";
+      String(
+        line &&
+        line.bend
+          ? line.bend
+          : "up"
+      ).toLowerCase() ===
+      "down"
+    )
+      ? "DOWN"
+      : "UP";
   }
 
-  function getEffectiveAngle(line, settings) {
-    var angle = getBendAngle(line);
-    var springback = num(settings.springback, 0);
+  function effectiveAngle(
+    line,
+    settings
+  ) {
+    var a =
+      normalizeAngle(line);
 
-    var effective = angle - springback;
+    var sb =
+      num(
+        settings.springback,
+        0
+      );
 
-    if (effective <= 0) {
-      effective = angle;
+    var result =
+      a - sb;
+
+    if (result <= 0) {
+      result = a;
     }
 
-    return effective;
+    return result;
   }
 
-  /* ---------------------------------------------------------
-     CONNECTED BEND PATH
-     ---------------------------------------------------------
+  /* =========================================================
+     BEND ALLOWANCE
+     ========================================================= */
 
-     Coordinates:
-       X = Length direction
-       Y = Depth direction
-       Z = height / folding direction
+  function bendAllowance(
+    line,
+    settings
+  ) {
+    var angle =
+      effectiveAngle(
+        line,
+        settings
+      );
 
-     This creates a connected material path.
+    var r =
+      settings.radiusMm;
 
-     NOTE:
-     The path is a geometric model used for interference
-     analysis. It does not modify the original dimensions.
-  */
+    var t =
+      settings.thicknessMm;
 
-  function buildSidePath(lines, side, settings) {
-    var result = [];
+    var k =
+      settings.kFactor;
 
-    if (!Array.isArray(lines) || !lines.length) {
-      return result;
-    }
+    var neutralRadius =
+      r + k * t;
 
-    var cursor = {
-      x: 0,
-      y: 0,
-      z: 0
+    var ba =
+      degToRad(angle) *
+      neutralRadius;
+
+    return {
+      angleDeg:
+        round(angle, 4),
+
+      radiusMm:
+        round(r, 4),
+
+      thicknessMm:
+        round(t, 4),
+
+      kFactor:
+        round(k, 4),
+
+      neutralRadiusMm:
+        round(
+          neutralRadius,
+          4
+        ),
+
+      bendAllowanceMm:
+        round(
+          ba,
+          4
+        ),
+
+      bendAllowanceIn:
+        round(
+          mmToInch(ba),
+          6
+        )
     };
+  }
 
-    var direction = side === "dep"
-      ? { x: 0, y: 1, z: 0 }
-      : { x: 1, y: 0, z: 0 };
+  /* =========================================================
+     BEND DEDUCTION
+     ========================================================= */
 
-    var bendAxis = side === "dep"
-      ? { x: 1, y: 0, z: 0 }
-      : { x: 0, y: 1, z: 0 };
+  function bendDeduction(
+    line,
+    settings
+  ) {
+    var angle =
+      effectiveAngle(
+        line,
+        settings
+      );
 
-    var normal = { x: 0, y: 0, z: 1 };
+    var r =
+      settings.radiusMm;
 
-    var total = 0;
+    var t =
+      settings.thicknessMm;
 
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i] || {};
+    var ba =
+      bendAllowance(
+        line,
+        settings
+      ).bendAllowanceMm;
 
-      var size = Math.max(
+    var setback =
+      (r + t) *
+      Math.tan(
+        degToRad(angle) / 2
+      );
+
+    var bd =
+      2 * setback - ba;
+
+    return {
+      outsideSetbackMm:
+        round(
+          setback,
+          4
+        ),
+
+      bendDeductionMm:
+        round(
+          bd,
+          4
+        ),
+
+      bendDeductionIn:
+        round(
+          mmToInch(bd),
+          6
+        )
+    };
+  }
+
+  /* =========================================================
+     COMPLETE USER LINE
+     ========================================================= */
+
+  function createLineData(
+    line,
+    index,
+    side,
+    settings
+  ) {
+    var size =
+      Math.max(
         0,
-        num(line.size, 0)
+        num(
+          line && line.size,
+          0
+        )
       );
 
-      var start = {
-        x: cursor.x,
-        y: cursor.y,
-        z: cursor.z
-      };
+    var angle =
+      normalizeAngle(line);
 
-      var end = add(
-        cursor,
-        mul(direction, size)
+    var bend =
+      normalizeBend(line);
+
+    var eff =
+      effectiveAngle(
+        line,
+        settings
       );
 
-      total += size;
+    return {
+      id:
+        side === "L"
+          ? "L" + (index + 1)
+          : "D" + (index + 1),
 
-      var segment = {
-        id: (side === "dep" ? "D" : "L") + (i + 1),
-        side: side,
-        index: i,
+      side:
+        side === "L"
+          ? "LENGTH"
+          : "DEPTH",
 
-        size: size,
+      index: index,
 
-        start: start,
-        end: end,
+      sequence:
+        index + 1,
 
-        direction: {
-          x: direction.x,
-          y: direction.y,
-          z: direction.z
-        },
+      sizeInch:
+        round(size, 6),
 
-        materialDirection: normalize(direction),
+      sizeMm:
+        round(
+          inchToMm(size),
+          3
+        ),
 
-        bend: getBendDirection(line),
-        angle: getBendAngle(line),
-        effectiveAngle: getEffectiveAngle(
+      angleDeg:
+        round(angle, 4),
+
+      effectiveAngleDeg:
+        round(eff, 4),
+
+      direction:
+        bend,
+
+      bendAllowance:
+        bendAllowance(
           line,
           settings
         ),
 
-        sequence: i + 1,
+      bendDeduction:
+        bendDeduction(
+          line,
+          settings
+        )
+    };
+  }
 
-        bendPoint: null,
-        nextDirection: null
+  /* =========================================================
+     BUILD COMPLETE FLAT NETWORK
+     
+     This is IMPORTANT:
+
+     Length and Depth are first converted into
+     one common sheet coordinate system.
+
+     No separate calculation island.
+     ========================================================= */
+
+  function buildFlatNetwork(
+    lenLines,
+    depLines,
+    settings
+  ) {
+    var length = [];
+    var depth = [];
+
+    var x = 0;
+
+    for (
+      var i = 0;
+      i < lenLines.length;
+      i++
+    ) {
+      var item =
+        createLineData(
+          lenLines[i],
+          i,
+          "L",
+          settings
+        );
+
+      item.startFlat = {
+        x: x,
+        y: 0
       };
 
-      result.push(segment);
+      x += item.sizeInch;
 
-      cursor = end;
+      item.endFlat = {
+        x: x,
+        y: 0
+      };
 
-      /*
-        Last line does not have a bend after it.
-      */
-      if (i < lines.length - 1) {
-        var sign = segment.bend === "UP"
-          ? 1
-          : -1;
+      item.positionInch =
+        x;
 
-        var angleRad =
-          degToRad(segment.effectiveAngle) *
-          sign;
+      length.push(item);
+    }
 
-        segment.bendPoint = {
+    var y = 0;
+
+    for (
+      var j = 0;
+      j < depLines.length;
+      j++
+    ) {
+      var itemD =
+        createLineData(
+          depLines[j],
+          j,
+          "D",
+          settings
+        );
+
+      itemD.startFlat = {
+        x: 0,
+        y: y
+      };
+
+      y += itemD.sizeInch;
+
+      itemD.endFlat = {
+        x: 0,
+        y: y
+      };
+
+      itemD.positionInch =
+        y;
+
+      depth.push(itemD);
+    }
+
+    return {
+      length: length,
+      depth: depth,
+
+      totalLengthIn:
+        round(x, 6),
+
+      totalDepthIn:
+        round(y, 6)
+    };
+  }
+
+  /* =========================================================
+     COMPLETE 3D BEND NETWORK
+
+     Every line is processed in sequence.
+
+     We keep:
+       start
+       end
+       direction
+       bend axis
+       normal
+       next direction
+     ========================================================= */
+
+  function build3DNetwork(
+    network,
+    settings
+  ) {
+    var result = {
+      length: [],
+      depth: []
+    };
+
+    build3DSide(
+      network.length,
+      "LENGTH",
+      settings,
+      result.length
+    );
+
+    build3DSide(
+      network.depth,
+      "DEPTH",
+      settings,
+      result.depth
+    );
+
+    return result;
+  }
+
+  function build3DSide(
+    lines,
+    side,
+    settings,
+    output
+  ) {
+    var cursor =
+      vec(0, 0, 0);
+
+    var direction =
+      side === "LENGTH"
+        ? vec(1, 0, 0)
+        : vec(0, 1, 0);
+
+    /*
+     * Bend axis is perpendicular to
+     * the current flat direction.
+     */
+    var axis =
+      side === "LENGTH"
+        ? vec(0, 1, 0)
+        : vec(1, 0, 0);
+
+    var normal =
+      vec(0, 0, 1);
+
+    for (
+      var i = 0;
+      i < lines.length;
+      i++
+    ) {
+      var line =
+        lines[i];
+
+      var start =
+        {
           x: cursor.x,
           y: cursor.y,
           z: cursor.z
         };
 
-        /*
-          Rotate the material direction around the
-          cross-axis.
-
-          Length:
-            bend axis = Y
-
-          Depth:
-            bend axis = X
-        */
-        direction = rotateDirection(
-          direction,
-          bendAxis,
-          angleRad
-        );
-
-        direction = normalize(direction);
-
-        segment.nextDirection = {
-          x: direction.x,
-          y: direction.y,
-          z: direction.z
-        };
-
-        /*
-          Move the cursor onto the newly rotated path.
-        */
-        cursor = add(
+      var end =
+        add(
           cursor,
           mul(
             direction,
-            0
+            line.sizeInch
           )
         );
 
+      var bendPoint =
+        end;
+
+      var bendRecord = {
+        id: line.id,
+
+        side: side,
+
+        index:
+          line.index,
+
+        sequence:
+          line.sequence,
+
+        sizeInch:
+          line.sizeInch,
+
+        angleDeg:
+          line.angleDeg,
+
+        effectiveAngleDeg:
+          line.effectiveAngleDeg,
+
+        direction:
+          line.direction,
+
+        start: start,
+
+        end: end,
+
+        bendPoint:
+          bendPoint,
+
+        directionVector:
+          normalize(
+            direction
+          ),
+
+        bendAxis:
+          normalize(axis),
+
+        surfaceNormal:
+          normalize(normal),
+
+        bendAllowance:
+          line.bendAllowance,
+
+        bendDeduction:
+          line.bendDeduction,
+
+        nextDirection: null,
+
+        nextNormal: null
+      };
+
+      /*
+       * Next bend.
+       */
+      if (
+        i <
+        lines.length - 1
+      ) {
+        var sign =
+          line.direction ===
+          "UP"
+            ? 1
+            : -1;
+
+        var angle =
+          degToRad(
+            line.effectiveAngleDeg
+          ) * sign;
+
+        var nextDirection =
+          rotateVector(
+            direction,
+            axis,
+            angle
+          );
+
+        nextDirection =
+          normalize(
+            nextDirection
+          );
+
         /*
-          Recalculate normal so later geometry remains
-          connected to the previous folded material.
-        */
-        normal = normalize(
-          cross(bendAxis, direction)
-        );
+         * Surface normal changes with bend.
+         */
+        var nextNormal =
+          normalize(
+            cross(
+              axis,
+              nextDirection
+            )
+          );
 
         if (
-          Math.abs(normal.x) < EPS &&
-          Math.abs(normal.y) < EPS &&
-          Math.abs(normal.z) < EPS
+          length(nextNormal) <
+          EPS
         ) {
-          normal = {
-            x: 0,
-            y: 0,
-            z: 1
-          };
+          nextNormal =
+            normal;
         }
+
+        bendRecord.nextDirection =
+          nextDirection;
+
+        bendRecord.nextNormal =
+          nextNormal;
+
+        direction =
+          nextDirection;
+
+        normal =
+          nextNormal;
       }
-    }
 
-    return {
-      side: side,
-      segments: result,
-      totalSize: total,
-      finalPosition: cursor,
-      finalDirection: direction,
-      finalNormal: normal
-    };
-  }
-
-  /* ---------------------------------------------------------
-     BEND RECORDS
-     --------------------------------------------------------- */
-
-  function collectBends(lines, side) {
-    var bends = [];
-
-    if (!Array.isArray(lines)) {
-      return bends;
-    }
-
-    for (var i = 0; i < lines.length - 1; i++) {
-      var line = lines[i];
-
-      bends.push({
-        id: (side === "dep" ? "D" : "L") + (i + 1),
-        side: side,
-        index: i,
-
-        angle: getBendAngle(line),
-
-        direction: getBendDirection(line),
-
-        /*
-          Array order is currently the user's bend order.
-          Later UI can provide a custom sequence without
-          changing this engine.
-        */
-        sequence: i + 1
-      });
-    }
-
-    return bends;
-  }
-
-  /* ---------------------------------------------------------
-     MATERIAL MOVEMENT
-     --------------------------------------------------------- */
-
-  function getMovementDescription(direction) {
-    var d = normalize(direction);
-
-    var parts = [];
-
-    if (Math.abs(d.x) > 0.05) {
-      parts.push(
-        d.x > 0 ? "+X" : "-X"
-      );
-    }
-
-    if (Math.abs(d.y) > 0.05) {
-      parts.push(
-        d.y > 0 ? "+Y" : "-Y"
-      );
-    }
-
-    if (Math.abs(d.z) > 0.05) {
-      parts.push(
-        d.z > 0 ? "+Z" : "-Z"
-      );
-    }
-
-    return parts.length
-      ? parts.join(" / ")
-      : "STATIONARY";
-  }
-
-  /* ---------------------------------------------------------
-     BEND PATH ZONE
-     ---------------------------------------------------------
-
-     Creates a conservative zone around a bend.
-
-     It is NOT a fixed cup size.
-
-     The zone is used to determine whether another
-     material segment occupies the space needed by
-     the bend.
-  */
-
-  function getBendZone(bend, side, settings) {
-    var radius = num(settings.radiusMm, 0.8);
-    var thickness = num(settings.thicknessMm, 0.8);
-
-    var effectiveRadius =
-      radius + thickness;
-
-    var angle = getBendAngle(bend);
-
-    /*
-      Convert mm to inch because user dimensions are inch.
-    */
-    var rIn = mmToInch(effectiveRadius);
-
-    /*
-      Larger angles create a larger movement zone.
-    */
-    var angleFactor =
-      Math.sin(
-        Math.min(
-          Math.PI / 2,
-          degToRad(angle)
-        ) / 2
+      output.push(
+        bendRecord
       );
 
-    var zone = rIn * (1 + angleFactor);
-
-    return {
-      radiusMm: effectiveRadius,
-      radiusIn: rIn,
-      zoneIn: Math.max(
-        mmToInch(thickness),
-        zone
-      )
-    };
-  }
-
-  /* ---------------------------------------------------------
-     2D SEGMENT DISTANCE
-     --------------------------------------------------------- */
-
-  function pointToSegmentDistance2D(
-    px,
-    py,
-    ax,
-    ay,
-    bx,
-    by
-  ) {
-    var dx = bx - ax;
-    var dy = by - ay;
-
-    var len2 = dx * dx + dy * dy;
-
-    if (len2 < EPS) {
-      var ddx = px - ax;
-      var ddy = py - ay;
-      return Math.sqrt(
-        ddx * ddx +
-        ddy * ddy
-      );
+      cursor =
+        end;
     }
-
-    var t =
-      ((px - ax) * dx +
-       (py - ay) * dy) /
-      len2;
-
-    t = clamp(t, 0, 1);
-
-    var cx = ax + t * dx;
-    var cy = ay + t * dy;
-
-    var ex = px - cx;
-    var ey = py - cy;
-
-    return Math.sqrt(
-      ex * ex +
-      ey * ey
-    );
   }
 
-  /* ---------------------------------------------------------
-     CROSS CORNER ANALYSIS
-     ---------------------------------------------------------
+  /* =========================================================
+     BEND ZONE
 
-     This checks Length × Depth intersections.
+     Zone is the physical area around a bend
+     where another bend may interfere.
+     ========================================================= */
 
-     The purpose is NOT to automatically cut every corner.
-
-     It first determines whether the two bend systems
-     create an actual material conflict.
-  */
-
-  function analyzeIntersection(
-    lenIndex,
-    depIndex,
-    lenLines,
-    depLines,
-    lenPath,
-    depPath,
+  function bendZone(
+    line,
     settings
   ) {
-    var L = lenLines[lenIndex];
-    var D = depLines[depIndex];
+    var r =
+      settings.radiusMm;
 
-    if (!L || !D) {
+    var t =
+      settings.thicknessMm;
+
+    var relief =
+      settings.reliefMm;
+
+    var angle =
+      line.effectiveAngleDeg;
+
+    /*
+     * Radius + material thickness.
+     */
+    var effectiveRadius =
+      r + t;
+
+    /*
+     * Angle dependent expansion.
+     */
+    var factor =
+      Math.sin(
+        Math.min(
+          180,
+          angle
+        ) *
+          Math.PI /
+          360
+      );
+
+    var zoneMm =
+      effectiveRadius *
+      (1 + factor) +
+      relief;
+
+    /*
+     * At least thickness.
+     */
+    zoneMm =
+      Math.max(
+        zoneMm,
+        t
+      );
+
+    return {
+      radiusMm:
+        round(
+          r,
+          4
+        ),
+
+      thicknessMm:
+        round(
+          t,
+          4
+        ),
+
+      effectiveRadiusMm:
+        round(
+          effectiveRadius,
+          4
+        ),
+
+      angleDeg:
+        round(
+          angle,
+          4
+        ),
+
+      zoneMm:
+        round(
+          zoneMm,
+          4
+        ),
+
+      zoneIn:
+        round(
+          mmToInch(zoneMm),
+          6
+        )
+    };
+  }
+
+  /* =========================================================
+     2D LINE INTERSECTION
+     ========================================================= */
+
+  function lineIntersection2D(
+    a1,
+    a2,
+    b1,
+    b2
+  ) {
+    var x1 = a1.x;
+    var y1 = a1.y;
+
+    var x2 = a2.x;
+    var y2 = a2.y;
+
+    var x3 = b1.x;
+    var y3 = b1.y;
+
+    var x4 = b2.x;
+    var y4 = b2.y;
+
+    var den =
+      (x1 - x2) *
+        (y3 - y4) -
+      (y1 - y2) *
+        (x3 - x4);
+
+    if (
+      Math.abs(den) <
+      EPS
+    ) {
       return null;
     }
 
-    /*
-      A crossing exists only when both positions exist.
-    */
-    var lenPosition = 0;
+    var px =
+      (
+        (x1 * y2 -
+          y1 * x2) *
+          (x3 - x4) -
+        (x1 - x2) *
+          (x3 * y4 -
+            y3 * x4)
+      ) / den;
 
-    for (var i = 0; i <= lenIndex; i++) {
-      lenPosition += num(
-        lenLines[i].size,
-        0
-      );
-    }
+    var py =
+      (
+        (x1 * y2 -
+          y1 * x2) *
+          (y3 - y4) -
+        (y1 - y2) *
+          (x3 * y4 -
+            y3 * x4)
+      ) / den;
 
-    var depPosition = 0;
+    return {
+      x: px,
+      y: py
+    };
+  }
 
-    for (var j = 0; j <= depIndex; j++) {
-      depPosition += num(
-        depLines[j].size,
-        0
-      );
-    }
+  /* =========================================================
+     ANGLE BETWEEN 3D DIRECTIONS
+     ========================================================= */
 
-    var lenSegment =
-      lenPath.segments[lenIndex];
+  function directionAngle(
+    a,
+    b
+  ) {
+    var aa =
+      normalize(a);
 
-    var depSegment =
-      depPath.segments[depIndex];
+    var bb =
+      normalize(b);
 
-    if (!lenSegment || !depSegment) {
-      return null;
-    }
-
-    var lenDirection =
-      lenSegment.materialDirection;
-
-    var depDirection =
-      depSegment.materialDirection;
-
-    /*
-      How much the two material directions differ.
-    */
-    var directionDot =
+    var d =
       clamp(
         Math.abs(
-          dot(
-            lenDirection,
-            depDirection
-          )
+          dot(aa, bb)
         ),
         0,
         1
       );
 
-    var directionAngle =
-      radToDeg(
-        Math.acos(directionDot)
-      );
-
-    /*
-      UP / DOWN relation.
-    */
-    var sameDirection =
-      getBendDirection(L) ===
-      getBendDirection(D);
-
-    /*
-      A geometric conflict indicator.
-
-      We do NOT use one fixed relief value.
-      Instead we estimate how much the two bend
-      movement zones overlap.
-
-      The final cut is zero unless the bend zones
-      actually overlap.
-    */
-    var lenBend = getBendZone(
-      L,
-      "len",
-      settings
+    return radToDeg(
+      Math.acos(d)
     );
+  }
 
-    var depBend = getBendZone(
-      D,
-      "dep",
-      settings
-    );
+  /* =========================================================
+     RELATIVE MOVEMENT
+     ========================================================= */
 
-    /*
-      Relative movement vectors.
-    */
-    var relativeMovement =
+  function movementStrength(
+    a,
+    b
+  ) {
+    var r =
       sub(
-        lenDirection,
-        depDirection
+        normalize(a),
+        normalize(b)
       );
 
-    var movementStrength =
-      Math.sqrt(
-        dot(
-          relativeMovement,
-          relativeMovement
-        )
+    return length(r);
+  }
+
+  /* =========================================================
+     NOTCH GEOMETRY
+
+     We create an actual polygon in flat-sheet coordinates.
+
+     This is geometry DATA, not just a red line.
+     ========================================================= */
+
+  function makeNotch(
+    center,
+    widthIn,
+    depthIn,
+    orientation
+  ) {
+    var w =
+      Math.max(
+        widthIn,
+        1 / 32
       );
+
+    var d =
+      Math.max(
+        depthIn,
+        1 / 32
+      );
+
+    var hw =
+      w / 2;
+
+    var hd =
+      d / 2;
 
     /*
-      Direction changes caused by each bend.
-    */
-    var lenAngle =
-      getEffectiveAngle(
+     * Standard rectangular relief.
+     *
+     * orientation is retained so Flat/3D
+     * can later use directional relief.
+     */
+    var points = [
+      {
+        x:
+          center.x - hw,
+        y:
+          center.y - hd
+      },
+
+      {
+        x:
+          center.x + hw,
+        y:
+          center.y - hd
+      },
+
+      {
+        x:
+          center.x + hw,
+        y:
+          center.y + hd
+      },
+
+      {
+        x:
+          center.x - hw,
+        y:
+          center.y + hd
+      }
+    ];
+
+    return {
+      type:
+        "RECTANGULAR_RELIEF",
+
+      orientation:
+        orientation,
+
+      center: {
+        x:
+          round(
+            center.x,
+            6
+          ),
+        y:
+          round(
+            center.y,
+            6
+          )
+      },
+
+      widthIn:
+        round(
+          w,
+          6
+        ),
+
+      depthIn:
+        round(
+          d,
+          6
+        ),
+
+      widthMm:
+        round(
+          inchToMm(w),
+          3
+        ),
+
+      depthMm:
+        round(
+          inchToMm(d),
+          3
+        ),
+
+      corners:
+        points.map(
+          function (p) {
+            return {
+              x:
+                round(
+                  p.x,
+                  6
+                ),
+              y:
+                round(
+                  p.y,
+                  6
+                )
+            };
+          }
+        ),
+
+      polygon: [
+        [
+          [
+            round(
+              points[0].x,
+              6
+            ),
+            round(
+              points[0].y,
+              6
+            )
+          ],
+
+          [
+            round(
+              points[1].x,
+              6
+            ),
+            round(
+              points[1].y,
+              6
+            )
+          ],
+
+          [
+            round(
+              points[2].x,
+              6
+            ),
+            round(
+              points[2].y,
+              6
+            )
+          ],
+
+          [
+            round(
+              points[3].x,
+              6
+            ),
+            round(
+              points[3].y,
+              6
+            )
+          ],
+
+          [
+            round(
+              points[0].x,
+              6
+            ),
+            round(
+              points[0].y,
+              6
+            )
+          ]
+        ]
+      ]
+    };
+  }
+
+  /* =========================================================
+     COMPLETE INTERACTION
+
+     IMPORTANT:
+
+     This function sees BOTH bend systems.
+
+     It does not calculate Length and Depth
+     as isolated systems.
+     ========================================================= */
+
+  function calculateInteraction(
+    L,
+    D,
+    L3D,
+    D3D,
+    settings
+  ) {
+    var lZone =
+      bendZone(
         L,
         settings
       );
 
-    var depAngle =
-      getEffectiveAngle(
+    var dZone =
+      bendZone(
         D,
         settings
       );
 
     /*
-      Base interaction.
-    */
-    var angleInteraction =
-      Math.sin(
-        degToRad(
-          Math.min(
-            180,
-            lenAngle + depAngle
-          )
-        ) / 2
+     * 3D direction interaction.
+     */
+    var angle3D =
+      directionAngle(
+        L3D.directionVector,
+        D3D.directionVector
+      );
+
+    var movement =
+      movementStrength(
+        L3D.directionVector,
+        D3D.directionVector
       );
 
     /*
-      Same UP/DOWN does not automatically mean
-      collision. It only changes the interaction.
-    */
+     * UP/DOWN relationship.
+     */
+    var sameDirection =
+      L.direction ===
+      D.direction;
+
+    /*
+     * Opposite directions generally create
+     * a stronger crossing interaction.
+     */
     var directionFactor =
       sameDirection
         ? 0.65
         : 1.0;
 
     /*
-      Calculate possible overlap zone.
-    */
-    var combinedZone =
-      lenBend.zoneIn +
-      depBend.zoneIn;
+     * Bend-angle interaction.
+     */
+    var totalAngle =
+      Math.min(
+        180,
+        L.effectiveAngleDeg +
+          D.effectiveAngleDeg
+      );
 
-    var overlap =
+    var angleFactor =
+      Math.sin(
+        degToRad(
+          totalAngle
+        ) / 2
+      );
+
+    /*
+     * Combined physical zones.
+     */
+    var combinedZone =
+      lZone.zoneIn +
+      dZone.zoneIn;
+
+    /*
+     * Overall interaction.
+     */
+    var rawOverlap =
       combinedZone *
-      angleInteraction *
+      angleFactor *
       directionFactor *
       Math.max(
         0.15,
-        movementStrength
+        movement
       );
 
     /*
-      If the bends are very shallow, reduce the
-      required relief.
-    */
-    if (lenAngle < 20) {
-      overlap *= 0.25;
+     * Very small angles don't consume
+     * much material.
+     */
+    if (
+      L.effectiveAngleDeg <
+      20
+    ) {
+      rawOverlap *=
+        0.25;
     }
 
-    if (depAngle < 20) {
-      overlap *= 0.25;
+    if (
+      D.effectiveAngleDeg <
+      20
+    ) {
+      rawOverlap *=
+        0.25;
     }
 
-    /*
-      Minimum practical material allowance.
-      This is NOT automatically applied as a cut.
-    */
     var thicknessIn =
       mmToInch(
-        num(
-          settings.thicknessMm,
-          0.8
-        )
+        settings.thicknessMm
       );
 
     /*
-      Required cut is only produced when the
-      calculated overlap exceeds the material
-      tolerance.
-
-      This prevents every crossing from becoming
-      a cup cut.
-    */
-    var requiredCut =
+     * Required material relief.
+     */
+    var relief =
       Math.max(
         0,
-        overlap - thicknessIn * 0.5
+        rawOverlap -
+          thicknessIn * 0.5
       );
 
     /*
-      Very small values are treated as no cut.
-    */
-    if (requiredCut < 1 / 16) {
-      requiredCut = 0;
+     * Minimum practical relief.
+     */
+    var minimumCut =
+      1 / 16;
+
+    if (
+      relief <
+      minimumCut
+    ) {
+      relief = 0;
     }
 
     /*
-      Cap the result so an accidental huge value
-      cannot destroy the sheet.
-    */
-    var maxCut =
+     * Safety maximum.
+     */
+    var maximumCut =
       Math.max(
         thicknessIn * 4,
         1 / 8
       );
 
-    requiredCut =
+    relief =
       Math.min(
-        requiredCut,
-        maxCut
+        relief,
+        maximumCut
       );
 
-    var interference =
-      requiredCut > 0;
+    var required =
+      relief > 0;
 
     return {
-      id:
-        "L" + (lenIndex + 1) +
-        "xD" + (depIndex + 1),
+      required:
+        required,
 
-      lenIndex: lenIndex,
-      depIndex: depIndex,
+      directionRelation:
+        sameDirection
+          ? "SAME"
+          : "OPPOSITE",
 
-      position: {
-        length: round(lenPosition, 6),
-        depth: round(depPosition, 6)
-      },
+      directionAngleDeg:
+        round(
+          angle3D,
+          4
+        ),
 
-      lengthBend: {
-        angle: getBendAngle(L),
-        effectiveAngle:
-          round(
-            lenAngle,
-            3
-          ),
-        direction:
-          getBendDirection(L),
-        movement:
-          getMovementDescription(
-            lenDirection
-          ),
-        sequence:
-          lenIndex + 1
-      },
+      movementStrength:
+        round(
+          movement,
+          6
+        ),
 
-      depthBend: {
-        angle: getBendAngle(D),
-        effectiveAngle:
-          round(
-            depAngle,
-            3
-          ),
-        direction:
-          getBendDirection(D),
-        movement:
-          getMovementDescription(
-            depDirection
-          ),
-        sequence:
-          depIndex + 1
-      },
+      lengthZoneIn:
+        round(
+          lZone.zoneIn,
+          6
+        ),
 
-      geometry: {
-        lengthDirection: lenDirection,
-        depthDirection: depDirection,
+      depthZoneIn:
+        round(
+          dZone.zoneIn,
+          6
+        ),
 
-        directionAngle:
-          round(
-            directionAngle,
-            3
-          ),
+      combinedZoneIn:
+        round(
+          combinedZone,
+          6
+        ),
 
-        movementStrength:
-          round(
-            movementStrength,
-            6
-          ),
+      angleFactor:
+        round(
+          angleFactor,
+          6
+        ),
 
-        combinedZone:
-          round(
-            combinedZone,
-            6
-          ),
+      directionFactor:
+        round(
+          directionFactor,
+          6
+        ),
 
-        overlap:
-          round(
-            overlap,
-            6
-          )
-      },
+      rawOverlapIn:
+        round(
+          rawOverlap,
+          6
+        ),
 
-      interference: interference,
+      requiredReliefIn:
+        round(
+          relief,
+          6
+        ),
 
-      cut: {
-        required: interference,
-        sizeInch:
-          round(
-            requiredCut,
-            6
-          ),
-        sizeMm:
-          round(
-            inchToMm(requiredCut),
-            3
-          )
-      },
-
-      status:
-        interference
-          ? "AUTO_CUT_REQUIRED"
-          : "NO_CUT"
+      requiredReliefMm:
+        round(
+          inchToMm(relief),
+          3
+        )
     };
   }
 
-  /* ---------------------------------------------------------
-     COMPLETE ANALYSIS
-     --------------------------------------------------------- */
+  /* =========================================================
+     BUILD ALL INTERSECTIONS
+
+     Every Length bend × every Depth bend
+     ========================================================= */
+
+  function buildIntersections(
+    network,
+    network3D,
+    settings
+  ) {
+    var results = [];
+
+    for (
+      var li = 0;
+      li < network.length.length;
+      li++
+    ) {
+      var L =
+        network.length[li];
+
+      /*
+       * Last segment normally has no following bend.
+       * It can still participate in geometry,
+       * so we keep it in the complete network.
+       */
+
+      var L3D =
+        network3D.length[li];
+
+      for (
+        var di = 0;
+        di < network.depth.length;
+        di++
+      ) {
+        var D =
+          network.depth[di];
+
+        var D3D =
+          network3D.depth[di];
+
+        if (!L || !D) {
+          continue;
+        }
+
+        /*
+         * Crossing position in flat sheet.
+         */
+        var center = {
+          x:
+            L.positionInch,
+
+          y:
+            D.positionInch
+        };
+
+        /*
+         * Complete interaction.
+         */
+        var interaction =
+          calculateInteraction(
+            L,
+            D,
+            L3D,
+            D3D,
+            settings
+          );
+
+        var cut = null;
+
+        if (
+          interaction.required
+        ) {
+          /*
+           * Use interaction relief
+           * in both dimensions for now.
+           */
+          var width =
+            interaction.requiredReliefIn;
+
+          var depth =
+            interaction.requiredReliefIn;
+
+          /*
+           * Orientation based on the
+           * stronger bend.
+           */
+          var orientation =
+            Math.max(
+              L.effectiveAngleDeg,
+              D.effectiveAngleDeg
+            ) >= 90
+              ? "CROSS_RELIEF"
+              : "LOCAL_RELIEF";
+
+          cut =
+            makeNotch(
+              center,
+              width,
+              depth,
+              orientation
+            );
+        }
+
+        results.push({
+          id:
+            L.id +
+            "x" +
+            D.id,
+
+          lenIndex:
+            L.index,
+
+          depIndex:
+            D.index,
+
+          position: {
+            x:
+              round(
+                center.x,
+                6
+              ),
+
+            y:
+              round(
+                center.y,
+                6
+              )
+          },
+
+          lengthBend: {
+            id:
+              L.id,
+
+            sequence:
+              L.sequence,
+
+            sizeInch:
+              L.sizeInch,
+
+            angleDeg:
+              L.angleDeg,
+
+            effectiveAngleDeg:
+              L.effectiveAngleDeg,
+
+            direction:
+              L.direction,
+
+            bendAllowance:
+              L.bendAllowance,
+
+            bendDeduction:
+              L.bendDeduction
+          },
+
+          depthBend: {
+            id:
+              D.id,
+
+            sequence:
+              D.sequence,
+
+            sizeInch:
+              D.sizeInch,
+
+            angleDeg:
+              D.angleDeg,
+
+            effectiveAngleDeg:
+              D.effectiveAngleDeg,
+
+            direction:
+              D.direction,
+
+            bendAllowance:
+              D.bendAllowance,
+
+            bendDeduction:
+              D.bendDeduction
+          },
+
+          interaction:
+            interaction,
+
+          interference:
+            interaction.required,
+
+          cut: cut
+            ? {
+                required: true,
+
+                type:
+                  "NOTCH",
+
+                shape:
+                  cut.type,
+
+                widthIn:
+                  cut.widthIn,
+
+                depthIn:
+                  cut.depthIn,
+
+                widthMm:
+                  cut.widthMm,
+
+                depthMm:
+                  cut.depthMm,
+
+                center:
+                  cut.center,
+
+                corners:
+                  cut.corners,
+
+                polygon:
+                  cut.polygon
+              }
+            : {
+                required: false,
+
+                type:
+                  "NONE",
+
+                shape:
+                  "NONE",
+
+                widthIn: 0,
+
+                depthIn: 0,
+
+                widthMm: 0,
+
+                depthMm: 0,
+
+                center:
+                  center,
+
+                corners: [],
+
+                polygon: null
+              },
+
+          status:
+            interaction.required
+              ? "AUTO_CUT_REQUIRED"
+              : "NO_CUT"
+        });
+      }
+    }
+
+    return results;
+  }
+
+  /* =========================================================
+     COMPLETE FLAT SHEET OUTLINE
+     ========================================================= */
+
+  function buildSheetOutline(
+    widthIn,
+    heightIn
+  ) {
+    return {
+      type:
+        "RECTANGULAR_SHEET",
+
+      widthIn:
+        round(
+          widthIn,
+          6
+        ),
+
+      heightIn:
+        round(
+          heightIn,
+          6
+        ),
+
+      widthMm:
+        round(
+          inchToMm(widthIn),
+          3
+        ),
+
+      heightMm:
+        round(
+          inchToMm(heightIn),
+          3
+        ),
+
+      corners: [
+        {
+          x: 0,
+          y: 0
+        },
+
+        {
+          x:
+            round(
+              widthIn,
+              6
+            ),
+          y: 0
+        },
+
+        {
+          x:
+            round(
+              widthIn,
+              6
+            ),
+          y:
+            round(
+              heightIn,
+              6
+            )
+        },
+
+        {
+          x: 0,
+          y:
+            round(
+              heightIn,
+              6
+            )
+        }
+      ]
+    };
+  }
+
+  /* =========================================================
+     CUT SUMMARY
+     ========================================================= */
+
+  function buildCutSummary(
+    intersections
+  ) {
+    return intersections
+      .filter(
+        function (x) {
+          return (
+            x.cut &&
+            x.cut.required
+          );
+        }
+      )
+      .map(
+        function (x) {
+          return {
+            id: x.id,
+
+            position:
+              x.position,
+
+            widthIn:
+              x.cut.widthIn,
+
+            depthIn:
+              x.cut.depthIn,
+
+            widthMm:
+              x.cut.widthMm,
+
+            depthMm:
+              x.cut.depthMm,
+
+            type:
+              x.cut.type,
+
+            shape:
+              x.cut.shape,
+
+            corners:
+              x.cut.corners
+          };
+        }
+      );
+  }
+
+  /* =========================================================
+     BEND SEQUENCE
+
+     Length + Depth are kept together.
+     ========================================================= */
+
+  function buildSequence(
+    network
+  ) {
+    var all = [];
+
+    network.length.forEach(
+      function (x) {
+        all.push({
+          id: x.id,
+
+          side:
+            "LENGTH",
+
+          index:
+            x.index,
+
+          sequence:
+            x.sequence,
+
+          sizeInch:
+            x.sizeInch,
+
+          angleDeg:
+            x.angleDeg,
+
+          effectiveAngleDeg:
+            x.effectiveAngleDeg,
+
+          direction:
+            x.direction
+        });
+      }
+    );
+
+    network.depth.forEach(
+      function (x) {
+        all.push({
+          id: x.id,
+
+          side:
+            "DEPTH",
+
+          index:
+            x.index,
+
+          sequence:
+            x.sequence,
+
+          sizeInch:
+            x.sizeInch,
+
+          angleDeg:
+            x.angleDeg,
+
+          effectiveAngleDeg:
+            x.effectiveAngleDeg,
+
+          direction:
+            x.direction
+        });
+      }
+    );
+
+    return all;
+  }
+
+  /* =========================================================
+     MAIN ANALYZE
+
+     THIS IS THE MAIN FUNCTION.
+
+     All user data enters here together.
+     ========================================================= */
 
   function analyze() {
-    var state = window.state || {};
+    var state =
+      window.state || {};
 
     var lenLines =
-      Array.isArray(state.lenLines)
+      Array.isArray(
+        state.lenLines
+      )
         ? state.lenLines
         : [];
 
     var depLines =
-      Array.isArray(state.depLines)
+      Array.isArray(
+        state.depLines
+      )
         ? state.depLines
         : [];
 
@@ -945,112 +1946,73 @@
       getSettings();
 
     /*
-      Build connected paths.
-    */
-    var lenPath =
-      buildSidePath(
+     * STEP 1
+     * Build complete common network.
+     */
+    var network =
+      buildFlatNetwork(
         lenLines,
-        "len",
-        settings
-      );
-
-    var depPath =
-      buildSidePath(
         depLines,
-        "dep",
         settings
       );
 
     /*
-      Collect bend records.
-    */
-    var lengthBends =
-      collectBends(
-        lenLines,
-        "len"
-      );
-
-    var depthBends =
-      collectBends(
-        depLines,
-        "dep"
+     * STEP 2
+     * Build complete 3D bend network.
+     */
+    var network3D =
+      build3DNetwork(
+        network,
+        settings
       );
 
     /*
-      Current sequence:
-        array order.
-
-      Later a custom sequence UI can replace
-      this without changing the analysis API.
-    */
-    var sequence = [];
-
-    lengthBends.forEach(function (b) {
-      sequence.push({
-        id: b.id,
-        side: "LENGTH",
-        index: b.index,
-        sequence: b.sequence,
-        angle: b.angle,
-        direction: b.direction
-      });
-    });
-
-    depthBends.forEach(function (b) {
-      sequence.push({
-        id: b.id,
-        side: "DEPTH",
-        index: b.index,
-        sequence: b.sequence,
-        angle: b.angle,
-        direction: b.direction
-      });
-    });
+     * STEP 3
+     * Calculate every Length × Depth
+     * interaction together.
+     */
+    var intersections =
+      buildIntersections(
+        network,
+        network3D,
+        settings
+      );
 
     /*
-      Cross-intersection analysis.
-    */
-    var intersections = [];
-
-    for (
-      var li = 0;
-      li < lenLines.length;
-      li++
-    ) {
-      for (
-        var di = 0;
-        di < depLines.length;
-        di++
-      ) {
-        var result =
-          analyzeIntersection(
-            li,
-            di,
-            lenLines,
-            depLines,
-            lenPath,
-            depPath,
-            settings
-          );
-
-        if (result) {
-          intersections.push(result);
-        }
-      }
-    }
-
+     * STEP 4
+     * Extract actual cuts.
+     */
     var cuts =
-      intersections.filter(
-        function (x) {
-          return x.cut.required;
-        }
+      buildCutSummary(
+        intersections
       );
 
     /*
-      Return ONE shared result object.
-    */
+     * STEP 5
+     * Final sheet outline.
+     */
+    var sheet =
+      buildSheetOutline(
+        network.totalLengthIn,
+        network.totalDepthIn
+      );
+
+    /*
+     * STEP 6
+     * Complete bend sequence.
+     */
+    var sequence =
+      buildSequence(
+        network
+      );
+
+    /*
+     * STEP 7
+     * Final result.
+     */
     return {
-      version: "geometry-v1",
+      version:
+        "geometry-v3",
 
       settings: {
         thicknessMm:
@@ -1063,46 +2025,65 @@
           settings.kFactor,
 
         springback:
-          settings.springback
+          settings.springback,
+
+        reliefMm:
+          settings.reliefMm
       },
 
-      length: {
-        total:
-          lenPath.totalSize,
+      /*
+       * COMPLETE USER DATA
+       */
+      input: {
+        lengthLines:
+          network.length,
 
-        segments:
-          lenPath.segments,
-
-        finalPosition:
-          lenPath.finalPosition,
-
-        finalDirection:
-          lenPath.finalDirection
+        depthLines:
+          network.depth
       },
 
-      depth: {
-        total:
-          depPath.totalSize,
+      /*
+       * FLAT SHEET
+       */
+      sheet:
+        sheet,
 
-        segments:
-          depPath.segments,
+      /*
+       * 3D NETWORK
+       */
+      model3D: {
+        length:
+          network3D.length,
 
-        finalPosition:
-          depPath.finalPosition,
-
-        finalDirection:
-          depPath.finalDirection
+        depth:
+          network3D.depth
       },
 
-      sequence: sequence,
+      /*
+       * BEND SEQUENCE
+       */
+      sequence:
+        sequence,
 
+      /*
+       * EVERY CROSSING
+       */
       intersections:
         intersections,
 
+      /*
+       * ONLY REQUIRED CUTS
+       */
       cuts:
         cuts,
 
       statistics: {
+        totalLengthLines:
+          network.length.length,
+
+        totalDepthLines:
+          network.depth.length,
+
         totalIntersections:
           intersections.length,
 
@@ -1116,9 +2097,9 @@
     };
   }
 
-  /* ---------------------------------------------------------
-     CUT LOOKUP
-     --------------------------------------------------------- */
+  /* =========================================================
+     GET ONE INTERSECTION / CUT
+     ========================================================= */
 
   function getCut(
     lenIndex,
@@ -1131,70 +2112,163 @@
 
     for (
       var i = 0;
-      i < data.intersections.length;
+      i <
+      data.intersections.length;
       i++
     ) {
-      var x =
+      var item =
         data.intersections[i];
 
       if (
-        x.lenIndex === lenIndex &&
-        x.depIndex === depIndex
+        item.lenIndex ===
+          lenIndex &&
+        item.depIndex ===
+          depIndex
       ) {
-        return x;
+        return item;
       }
     }
 
     return null;
   }
 
-  /* ---------------------------------------------------------
+  /* =========================================================
      DEBUG
-     --------------------------------------------------------- */
+     ========================================================= */
 
   function debug() {
-    var data = analyze();
+    var data =
+      analyze();
 
     console.log(
-      "=== GEOMETRY ENGINE ==="
+      "================================"
     );
 
     console.log(
-      "Sequence:",
+      " GEOMETRY ENGINE V3"
+    );
+
+    console.log(
+      "================================"
+    );
+
+    console.log(
+      "SETTINGS:",
+      data.settings
+    );
+
+    console.log(
+      "INPUT LENGTH:",
+      data.input.lengthLines
+    );
+
+    console.log(
+      "INPUT DEPTH:",
+      data.input.depthLines
+    );
+
+    console.log(
+      "SHEET:",
+      data.sheet
+    );
+
+    console.log(
+      "3D LENGTH:",
+      data.model3D.length
+    );
+
+    console.log(
+      "3D DEPTH:",
+      data.model3D.depth
+    );
+
+    console.log(
+      "SEQUENCE:",
       data.sequence
     );
 
     console.log(
-      "Intersections:",
+      "ALL INTERSECTIONS:",
       data.intersections
     );
 
     console.log(
-      "Automatic cuts:",
+      "REQUIRED CUTS:",
       data.cuts
+    );
+
+    console.log(
+      "STATISTICS:",
+      data.statistics
     );
 
     return data;
   }
 
-  /* ---------------------------------------------------------
+  /* =========================================================
      PUBLIC API
-     --------------------------------------------------------- */
+     ========================================================= */
 
   window.GeometryEngine = {
-    analyze: analyze,
-    getCut: getCut,
-    debug: debug,
+
+    analyze:
+      analyze,
+
+    getCut:
+      getCut,
+
+    debug:
+      debug,
 
     helpers: {
-      degToRad: degToRad,
-      radToDeg: radToDeg,
-      inchToMm: inchToMm,
-      mmToInch: mmToInch,
-      normalize: normalize,
-      dot: dot,
-      cross: cross,
-      distance: distance
+
+      num:
+        num,
+
+      clamp:
+        clamp,
+
+      degToRad:
+        degToRad,
+
+      radToDeg:
+        radToDeg,
+
+      inchToMm:
+        inchToMm,
+
+      mmToInch:
+        mmToInch,
+
+      normalize:
+        normalize,
+
+      dot:
+        dot,
+
+      cross:
+        cross,
+
+      distance:
+        distance,
+
+      lerp:
+        lerp,
+
+      bendAllowance:
+        bendAllowance,
+
+      bendDeduction:
+        bendDeduction,
+
+      buildFlatNetwork:
+        buildFlatNetwork,
+
+      build3DNetwork:
+        build3DNetwork,
+
+      makeNotch:
+        makeNotch
     }
   };
 
