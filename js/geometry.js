@@ -1,45 +1,25 @@
 /* =========================================================
-   GEOMETRY ENGINE V3
-   MUNNU FABRICATION / SHEET METAL
-
-   COMPLETE DATA MODEL
-
-   LENGTH:
-     L1 → L2 → L3 → ...
-
-   DEPTH:
-     D1 → D2 → D3 → ...
-
-   Every line contains:
-     size
-     angle
-     UP / DOWN
-     position
-     sequence
-
-   ENGINE FLOW:
-
-     USER DATA
-        ↓
-     COMPLETE BEND NETWORK
-        ↓
-     BEND ALLOWANCE
-     BEND DEDUCTION
-     SPRINGBACK
-     RADIUS
-     THICKNESS
-        ↓
-     3D BEND PATH
-        ↓
-     BEND INTERACTION
-        ↓
-     MATERIAL INTERFERENCE
-        ↓
-     NOTCH / RELIEF GEOMETRY
-        ↓
-     FINAL FLAT DATA
-
-   No external geometry library.
+   GEOMETRY ENGINE V4
+   Master Engineering Geometry
+   ---------------------------------------------------------
+   Flow:
+   USER INPUT
+      ↓
+   normalize input
+      ↓
+   BA / BD / setback
+      ↓
+   bend positions
+      ↓
+   bend sequence
+      ↓
+   Length × Depth interaction
+      ↓
+   interference / relief
+      ↓
+   cup-cut decision
+      ↓
+   MASTER RESULT
    ========================================================= */
 
 (function () {
@@ -47,79 +27,104 @@
 
   var EPS = 0.000001;
 
-  /* =========================================================
-     BASIC MATH
-     ========================================================= */
+  /* =======================================================
+     BASIC HELPERS
+     ======================================================= */
 
   function num(v, fallback) {
     var n = Number(v);
-    return Number.isFinite(n)
-      ? n
-      : (fallback || 0);
+    return Number.isFinite(n) ? n : (fallback || 0);
   }
 
   function clamp(v, min, max) {
-    return Math.max(
-      min,
-      Math.min(max, v)
-    );
-  }
-
-  function degToRad(v) {
-    return v * Math.PI / 180;
-  }
-
-  function radToDeg(v) {
-    return v * 180 / Math.PI;
+    return Math.max(min, Math.min(max, v));
   }
 
   function round(v, digits) {
-    var p = Math.pow(
-      10,
-      digits || 0
-    );
-
+    var p = Math.pow(10, digits || 4);
     return Math.round(v * p) / p;
   }
 
-  function inchToMm(v) {
-    return num(v, 0) * 25.4;
+  function round16(v) {
+    return Math.round(v * 16) / 16;
+  }
+
+  function degToRad(deg) {
+    return deg * Math.PI / 180;
+  }
+
+  function radToDeg(rad) {
+    return rad * 180 / Math.PI;
+  }
+
+  function inchToMM(v) {
+    return v * 25.4;
   }
 
   function mmToInch(v) {
-    return num(v, 0) / 25.4;
+    return v / 25.4;
   }
+
+  function cleanZero(v) {
+    return Math.abs(v) < EPS ? 0 : v;
+  }
+
+  function clone(obj) {
+    return JSON.parse(JSON.stringify(obj));
+  }
+
+  /* =======================================================
+     VECTOR HELPERS
+     ======================================================= */
 
   function vec(x, y, z) {
     return {
-      x: x || 0,
-      y: y || 0,
-      z: z || 0
+      x: num(x),
+      y: num(y),
+      z: num(z)
     };
   }
 
   function add(a, b) {
-    return {
-      x: a.x + b.x,
-      y: a.y + b.y,
-      z: a.z + b.z
-    };
+    return vec(
+      a.x + b.x,
+      a.y + b.y,
+      a.z + b.z
+    );
   }
 
   function sub(a, b) {
-    return {
-      x: a.x - b.x,
-      y: a.y - b.y,
-      z: a.z - b.z
-    };
+    return vec(
+      a.x - b.x,
+      a.y - b.y,
+      a.z - b.z
+    );
   }
 
-  function mul(a, s) {
-    return {
-      x: a.x * s,
-      y: a.y * s,
-      z: a.z * s
-    };
+  function mul(a, n) {
+    return vec(
+      a.x * n,
+      a.y * n,
+      a.z * n
+    );
+  }
+
+  function length(a) {
+    return Math.sqrt(
+      a.x * a.x +
+      a.y * a.y +
+      a.z * a.z
+    );
+  }
+
+  function normalize(a) {
+    var l = length(a);
+
+    if (l < EPS) {
+      return vec(0, 0, 0);
+    }
+
+    return mul(a, 1 / l);
   }
 
   function dot(a, b) {
@@ -131,863 +136,760 @@
   }
 
   function cross(a, b) {
-    return {
-      x:
-        a.y * b.z -
-        a.z * b.y,
-
-      y:
-        a.z * b.x -
-        a.x * b.z,
-
-      z:
-        a.x * b.y -
-        a.y * b.x
-    };
-  }
-
-  function length(v) {
-    return Math.sqrt(
-      v.x * v.x +
-      v.y * v.y +
-      v.z * v.z
+    return vec(
+      a.y * b.z - a.z * b.y,
+      a.z * b.x - a.x * b.z,
+      a.x * b.y - a.y * b.x
     );
   }
 
-  function normalize(v) {
-    var len = length(v);
-
-    if (len < EPS) {
-      return vec(0, 0, 0);
-    }
-
-    return {
-      x: v.x / len,
-      y: v.y / len,
-      z: v.z / len
-    };
+  function distance3D(a, b) {
+    return length(sub(a, b));
   }
 
-  function distance(a, b) {
-    return length(
-      sub(a, b)
-    );
-  }
-
-  function lerp(a, b, t) {
-    return {
-      x:
-        a.x +
-        (b.x - a.x) * t,
-
-      y:
-        a.y +
-        (b.y - a.y) * t,
-
-      z:
-        a.z +
-        (b.z - a.z) * t
-    };
-  }
-
-  /* =========================================================
-     ROTATE VECTOR AROUND AXIS
-     ========================================================= */
-
-  function rotateVector(
-    vector,
-    axis,
-    angle
-  ) {
-    var v = vector;
-    var k = normalize(axis);
-
-    var c = Math.cos(angle);
-    var s = Math.sin(angle);
-
-    var term1 =
-      mul(v, c);
-
-    var term2 =
-      mul(
-        cross(k, v),
-        s
-      );
-
-    var term3 =
-      mul(
-        k,
-        dot(k, v) *
-          (1 - c)
-      );
-
-    return add(
-      add(term1, term2),
-      term3
-    );
-  }
-
-  /* =========================================================
-     SETTINGS — with validation
-     ========================================================= */
+  /* =======================================================
+     SETTINGS
+     ======================================================= */
 
   function getSettings() {
-    var s =
-      window.settings || {};
+    var s = window.AppState && window.AppState.settings;
+
+    if (!s && window.state) {
+      s = window.state.settings;
+    }
+
+    s = s || {};
+
+    var material = s.material || "SS304";
+
+    var thickness = clamp(
+      num(s.thickness, 0.8),
+      0.1,
+      10
+    );
+
+    var radius = clamp(
+      num(s.radius, 0.8),
+      0.1,
+      50
+    );
+
+    var kDefault =
+      material === "SS202" ? 0.45 : 0.44;
+
+    var kfactor = clamp(
+      num(s.kfactor, kDefault),
+      0,
+      1
+    );
+
+    var springback = clamp(
+      num(s.springback, 0.5),
+      0,
+      30
+    );
+
+    var relief = clamp(
+      num(s.relief, 1.6),
+      0,
+      50
+    );
+
+    var vdie = clamp(
+      num(s.vdie, 6),
+      0.1,
+      100
+    );
 
     return {
-      thicknessMm:
-        clamp(
-          num(s.thickness, 0.8),
-          0.1,
-          10
-        ),
-
-      radiusMm:
-        clamp(
-          num(s.radius, 0.8),
-          0.1,
-          20
-        ),
-
-      kFactor:
-        clamp(
-          num(s.kfactor, 0.44),
-          0,
-          1
-        ),
-
-      springback:
-        clamp(
-          num(s.springback, 0.5),
-          0,
-          30
-        ),
-
-      reliefMm:
-        clamp(
-          num(s.relief, 1.6),
-          0,
-          20
-        )
+      material: material,
+      thickness: thickness,
+      radius: radius,
+      kfactor: kfactor,
+      springback: springback,
+      relief: relief,
+      vdie: vdie
     };
   }
 
-  /* =========================================================
-     NORMALIZE LINE DATA
-     ========================================================= */
+  /* =======================================================
+     INPUT NORMALIZATION
+     ======================================================= */
 
   function normalizeAngle(line) {
-    var a =
-      num(
-        line && line.angle,
-        90
-      );
+    var a = num(
+      line && (
+        line.angle !== undefined
+          ? line.angle
+          : line.degree
+      ),
+      90
+    );
 
-    if (a <= 0) {
-      a = 90;
-    }
+    /*
+      Engineering range:
+      0° = no bend
+      90° = right angle
+      135° = reverse/obtuse bend
+      180° = full fold limit
+    */
 
-    if (a > 180) {
-      a = 180;
-    }
-
-    return a;
+    return clamp(a, 0, 180);
   }
 
   function normalizeBend(line) {
     var b = String(
-      line && line.bend
-        ? line.bend
-        : "up"
+      line && (
+        line.bend !== undefined
+          ? line.bend
+          : line.direction
+      )
     ).toLowerCase();
 
     if (
       b === "down" ||
-      b === "false" ||
-      b === "0" ||
-      b === "-1"
+      b === "downward" ||
+      b === "d" ||
+      b === "-1" ||
+      b === "false"
     ) {
-      return "DOWN";
+      return "down";
     }
 
-    return "UP";
+    return "up";
   }
 
-  function effectiveAngle(
-    line,
-    settings
-  ) {
-    var a =
-      normalizeAngle(line);
+  function effectiveAngle(line, settings) {
+    var a = normalizeAngle(line);
 
-    var sb =
-      num(
-        settings.springback,
-        0
-      );
+    /*
+      Springback is subtracted from the intended bend.
+      Never allow a negative physical bend.
+    */
 
-    var result =
-      a - sb;
-
-    if (result <= 0) {
-      result = a;
-    }
-
-    return result;
+    return clamp(
+      a - settings.springback,
+      0,
+      180
+    );
   }
 
-  /* =========================================================
-     BEND ALLOWANCE
-     ========================================================= */
+  /* =======================================================
+     BEND ENGINEERING FORMULAS
+     ======================================================= */
 
-  function bendAllowance(
-    line,
-    settings
-  ) {
-    var angle =
-      effectiveAngle(
-        line,
-        settings
-      );
-
-    var r =
-      settings.radiusMm;
-
-    var t =
-      settings.thicknessMm;
-
-    var k =
-      settings.kFactor;
+  function bendAllowance(angleDeg, radius, thickness, kfactor) {
+    var angleRad = degToRad(angleDeg);
 
     var neutralRadius =
-      r + k * t;
+      radius + (kfactor * thickness);
 
-    var ba =
-      degToRad(angle) *
-      neutralRadius;
+    var baMM =
+      angleRad * neutralRadius;
 
     return {
-      angleDeg:
-        round(angle, 4),
-
-      radiusMm:
-        round(r, 4),
-
-      thicknessMm:
-        round(t, 4),
-
-      kFactor:
-        round(k, 4),
-
-      neutralRadiusMm:
-        round(
-          neutralRadius,
-          4
-        ),
-
-      bendAllowanceMm:
-        round(
-          ba,
-          4
-        ),
-
-      bendAllowanceIn:
-        round(
-          mmToInch(ba),
-          6
-        )
+      angleDeg: angleDeg,
+      angleRad: angleRad,
+      neutralRadiusMM: neutralRadius,
+      baMM: baMM,
+      baInch: mmToInch(baMM)
     };
   }
 
-  /* =========================================================
-     BEND DEDUCTION
-     ========================================================= */
-
-  function bendDeduction(
-    line,
-    settings
-  ) {
-    var angle =
-      effectiveAngle(
-        line,
-        settings
-      );
-
-    var r =
-      settings.radiusMm;
-
-    var t =
-      settings.thicknessMm;
-
-    var ba =
-      bendAllowance(
-        line,
-        settings
-      ).bendAllowanceMm;
+  function bendDeduction(angleDeg, radius, thickness, kfactor) {
+    var ba = bendAllowance(
+      angleDeg,
+      radius,
+      thickness,
+      kfactor
+    );
 
     var setback =
-      (r + t) *
-      Math.tan(
-        degToRad(angle) / 2
-      );
+      (radius + thickness) *
+      Math.tan(degToRad(angleDeg) / 2);
 
     var bd =
-      2 * setback - ba;
+      (2 * setback) - ba.baMM;
 
     return {
-      outsideSetbackMm:
-        round(
-          setback,
-          4
-        ),
-
-      bendDeductionMm:
-        round(
-          bd,
-          4
-        ),
-
-      bendDeductionIn:
-        round(
-          mmToInch(bd),
-          6
-        )
+      setbackMM: setback,
+      setbackInch: mmToInch(setback),
+      bdMM: bd,
+      bdInch: mmToInch(bd),
+      baMM: ba.baMM,
+      baInch: ba.baInch
     };
   }
 
-  /* =========================================================
-     COMPLETE USER LINE
-     ========================================================= */
+  function calculateBend(line, settings) {
+    var intended = normalizeAngle(line);
+
+    var effective = effectiveAngle(
+      line,
+      settings
+    );
+
+    var ba = bendAllowance(
+      effective,
+      settings.radius,
+      settings.thickness,
+      settings.kfactor
+    );
+
+    var bd = bendDeduction(
+      effective,
+      settings.radius,
+      settings.thickness,
+      settings.kfactor
+    );
+
+    return {
+      intendedAngleDeg: round(intended, 3),
+      effectiveAngleDeg: round(effective, 3),
+
+      direction: normalizeBend(line),
+
+      thicknessMM: settings.thickness,
+      radiusMM: settings.radius,
+      kfactor: settings.kfactor,
+
+      neutralRadiusMM:
+        round(ba.neutralRadiusMM, 4),
+
+      bendAllowanceMM:
+        round(ba.baMM, 4),
+
+      bendAllowanceInch:
+        round(ba.baInch, 6),
+
+      setbackMM:
+        round(bd.setbackMM, 4),
+
+      setbackInch:
+        round(bd.setbackInch, 6),
+
+      bendDeductionMM:
+        round(bd.bdMM, 4),
+
+      bendDeductionInch:
+        round(bd.bdInch, 6)
+    };
+  }
+
+  /* =======================================================
+     LINE DATA
+     ======================================================= */
 
   function createLineData(
     line,
-    index,
     side,
+    index,
     settings
   ) {
-    var size =
-      Math.max(
-        0,
-        Math.min(
-          1000,
-          num(
-            line && line.size,
-            0
-          )
-        )
-      );
+    line = line || {};
 
-    var angle =
-      normalizeAngle(line);
+    var size = clamp(
+      num(
+        line.size !== undefined
+          ? line.size
+          : line.value,
+        0
+      ),
+      0,
+      1000
+    );
 
-    var bend =
-      normalizeBend(line);
+    var bend = calculateBend(
+      line,
+      settings
+    );
 
-    var eff =
-      effectiveAngle(
-        line,
-        settings
-      );
+    var id =
+      line.id ||
+      (
+        side === "length"
+          ? "L"
+          : "D"
+      ) + (index + 1);
 
     return {
-      id:
-        side === "L"
-          ? "L" + (index + 1)
-          : "D" + (index + 1),
+      id: id,
 
-      side:
-        side === "L"
-          ? "LENGTH"
-          : "DEPTH",
+      side: side,
 
       index: index,
 
-      sequence:
-        index + 1,
+      sequence: index + 1,
 
-      sizeInch:
-        round(size, 6),
+      sizeInch: round(size, 6),
 
-      sizeMm:
-        round(
-          inchToMm(size),
-          3
-        ),
+      sizeMM: round(
+        inchToMM(size),
+        4
+      ),
 
-      angleDeg:
-        round(angle, 4),
+      angle: bend.intendedAngleDeg,
 
-      effectiveAngleDeg:
-        round(eff, 4),
+      effectiveAngle:
+        bend.effectiveAngleDeg,
 
-      direction:
-        bend,
+      direction: bend.direction,
 
-      bendAllowance:
-        bendAllowance(
-          line,
-          settings
-        ),
+      bendAllowanceMM:
+        bend.bendAllowanceMM,
 
-      bendDeduction:
-        bendDeduction(
-          line,
-          settings
-        )
+      bendAllowanceInch:
+        bend.bendAllowanceInch,
+
+      setbackMM:
+        bend.setbackMM,
+
+      setbackInch:
+        bend.setbackInch,
+
+      bendDeductionMM:
+        bend.bendDeductionMM,
+
+      bendDeductionInch:
+        bend.bendDeductionInch,
+
+      neutralRadiusMM:
+        bend.neutralRadiusMM,
+
+      thicknessMM:
+        bend.thicknessMM,
+
+      radiusMM:
+        bend.radiusMM,
+
+      kfactor:
+        bend.kfactor,
+
+      original: clone(line)
     };
   }
 
-  /* =========================================================
-     BUILD COMPLETE FLAT NETWORK
-     ========================================================= */
+  /* =======================================================
+     POSITION CALCULATION
+     ======================================================= */
 
-  function buildFlatNetwork(
-    lenLines,
-    depLines,
-    settings
-  ) {
-    var length = [];
-    var depth = [];
+  /*
+    User-entered dimensions are treated as finished leg
+    dimensions.
 
-    var x = 0;
+    For a chain of bends, the marking position is adjusted
+    by local bend deduction.
 
-    for (
-      var i = 0;
-      i < lenLines.length;
-      i++
-    ) {
-      var item =
-        createLineData(
-          lenLines[i],
-          i,
-          "L",
-          settings
-        );
+    We do NOT blindly subtract BD from every line.
+    Only the bend boundaries are shifted.
+  */
 
-      item.startFlat = {
-        x: x,
-        y: 0
-      };
+  function buildSidePositions(lines) {
+    var result = [];
 
-      x += item.sizeInch;
+    var running = 0;
 
-      item.endFlat = {
-        x: x,
-        y: 0
-      };
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
 
-      item.positionInch =
-        x;
+      var position =
+        running + line.sizeInch;
 
-      length.push(item);
+      result.push({
+        id: line.id,
+        side: line.side,
+        index: line.index,
+
+        startInch:
+          round(running, 6),
+
+        endInch:
+          round(position, 6),
+
+        nominalSizeInch:
+          line.sizeInch,
+
+        bend: line
+      });
+
+      running = position;
     }
-
-    var y = 0;
-
-    for (
-      var j = 0;
-      j < depLines.length;
-      j++
-    ) {
-      var itemD =
-        createLineData(
-          depLines[j],
-          j,
-          "D",
-          settings
-        );
-
-      itemD.startFlat = {
-        x: 0,
-        y: y
-      };
-
-      y += itemD.sizeInch;
-
-      itemD.endFlat = {
-        x: 0,
-        y: y
-      };
-
-      itemD.positionInch =
-        y;
-
-      depth.push(itemD);
-    }
-
-    return {
-      length: length,
-      depth: depth,
-
-      totalLengthIn:
-        round(x, 6),
-
-      totalDepthIn:
-        round(y, 6)
-    };
-  }
-
-  /* =========================================================
-     COMPLETE 3D BEND NETWORK
-     ========================================================= */
-
-  function build3DNetwork(
-    network,
-    settings
-  ) {
-    var result = {
-      length: [],
-      depth: []
-    };
-
-    build3DSide(
-      network.length,
-      "LENGTH",
-      settings,
-      result.length
-    );
-
-    build3DSide(
-      network.depth,
-      "DEPTH",
-      settings,
-      result.depth
-    );
 
     return result;
   }
 
-  function build3DSide(
-    lines,
-    side,
-    settings,
-    output
-  ) {
-    var cursor =
-      vec(0, 0, 0);
+  function buildMarkingPositions(lines) {
+    var result = [];
 
-    var direction =
-      side === "LENGTH"
-        ? vec(1, 0, 0)
-        : vec(0, 1, 0);
+    var running = 0;
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+
+      /*
+        Bend line is placed at the end of the entered leg.
+        The actual developed sheet relationship is kept
+        separately through BA/BD so downstream modules
+        can distinguish user size from developed geometry.
+      */
+
+      running += line.sizeInch;
+
+      result.push({
+        id: line.id,
+        side: line.side,
+        index: line.index,
+
+        positionInch:
+          round(running, 6),
+
+        positionMM:
+          round(inchToMM(running), 4),
+
+        userSizeInch:
+          line.sizeInch,
+
+        BAInch:
+          line.bendAllowanceInch,
+
+        BDInch:
+          line.bendDeductionInch
+      });
+    }
+
+    return result;
+  }
+
+  /* =======================================================
+     FLAT NETWORK
+     ======================================================= */
+
+  function buildFlatNetwork(
+    lengthLines,
+    depthLines
+  ) {
+    var lengthPositions =
+      buildMarkingPositions(lengthLines);
+
+    var depthPositions =
+      buildMarkingPositions(depthLines);
+
+    var totalLength =
+      lengthLines.reduce(
+        function (sum, l) {
+          return sum + l.sizeInch;
+        },
+        0
+      );
+
+    var totalDepth =
+      depthLines.reduce(
+        function (sum, l) {
+          return sum + l.sizeInch;
+        },
+        0
+      );
+
+    return {
+      totalLengthInch:
+        round(totalLength, 6),
+
+      totalDepthInch:
+        round(totalDepth, 6),
+
+      totalLengthMM:
+        round(inchToMM(totalLength), 4),
+
+      totalDepthMM:
+        round(inchToMM(totalDepth), 4),
+
+      lengthPositions:
+        lengthPositions,
+
+      depthPositions:
+        depthPositions
+    };
+  }
+
+  /* =======================================================
+     BEND AXIS / DIRECTION
+     ======================================================= */
+
+  function directionForBend(
+    previous,
+    side,
+    bend
+  ) {
+    var angle =
+      degToRad(bend.effectiveAngle);
+
+    var sign =
+      bend.direction === "down"
+        ? -1
+        : 1;
+
+    if (!previous) {
+      if (side === "length") {
+        return {
+          axis: vec(1, 0, 0),
+          normal: vec(0, 0, 1)
+        };
+      }
+
+      return {
+        axis: vec(0, 1, 0),
+        normal: vec(0, 0, 1)
+      };
+    }
 
     var axis =
-      side === "LENGTH"
+      normalize(previous.axis);
+
+    var normal =
+      normalize(previous.normal);
+
+    var rotationAxis =
+      side === "length"
         ? vec(0, 1, 0)
         : vec(1, 0, 0);
 
-    var normal =
-      vec(0, 0, 1);
+    /*
+      Rodrigues rotation.
+    */
 
-    for (
-      var i = 0;
-      i < lines.length;
-      i++
-    ) {
-      var line =
-        lines[i];
+    function rotate(v, axisVector, radians) {
+      var c = Math.cos(radians);
+      var s = Math.sin(radians);
 
-      var start =
-        {
-          x: cursor.x,
-          y: cursor.y,
-          z: cursor.z
-        };
+      var term1 =
+        mul(v, c);
+
+      var term2 =
+        mul(
+          cross(axisVector, v),
+          s
+        );
+
+      var term3 =
+        mul(
+          axisVector,
+          dot(axisVector, v) * (1 - c)
+        );
+
+      return normalize(
+        add(
+          add(term1, term2),
+          term3
+        )
+      );
+    }
+
+    var amount =
+      angle * sign;
+
+    var nextAxis =
+      rotate(
+        axis,
+        normalize(rotationAxis),
+        amount
+      );
+
+    var nextNormal =
+      rotate(
+        normal,
+        normalize(rotationAxis),
+        amount
+      );
+
+    return {
+      axis: nextAxis,
+      normal: nextNormal
+    };
+  }
+
+  /* =======================================================
+     3D NETWORK
+     ======================================================= */
+
+  function build3DNetwork(
+    lengthLines,
+    depthLines
+  ) {
+    var all = [];
+
+    for (var i = 0; i < lengthLines.length; i++) {
+      all.push({
+        side: "length",
+        index: i,
+        line: lengthLines[i]
+      });
+    }
+
+    for (var j = 0; j < depthLines.length; j++) {
+      all.push({
+        side: "depth",
+        index: j,
+        line: depthLines[j]
+      });
+    }
+
+    /*
+      Preserve user input ordering inside each side.
+      Sequence number is generated explicitly below.
+    */
+
+    var current = {
+      position: vec(0, 0, 0),
+      axis: vec(1, 0, 0),
+      normal: vec(0, 0, 1)
+    };
+
+    var records = [];
+
+    for (var k = 0; k < all.length; k++) {
+      var item = all[k];
+      var line = item.line;
+
+      var lengthInch =
+        line.sizeInch;
+
+      var direction =
+        directionForBend(
+          current,
+          item.side,
+          line
+        );
+
+      var travel =
+        mul(
+          direction.axis,
+          lengthInch
+        );
 
       var end =
         add(
-          cursor,
-          mul(
-            direction,
-            line.sizeInch
-          )
+          current.position,
+          travel
         );
 
-      var bendPoint =
-        end;
-
-      var bendRecord = {
+      records.push({
         id: line.id,
 
-        side: side,
+        side: item.side,
 
-        index:
-          line.index,
+        index: item.index,
 
-        sequence:
-          line.sequence,
+        sequence: k + 1,
 
-        sizeInch:
-          line.sizeInch,
+        start: clone(current.position),
 
-        angleDeg:
-          line.angleDeg,
+        end: clone(end),
 
-        effectiveAngleDeg:
-          line.effectiveAngleDeg,
+        axis: clone(direction.axis),
+
+        normal: clone(direction.normal),
+
+        angle:
+          line.angle,
+
+        effectiveAngle:
+          line.effectiveAngle,
 
         direction:
           line.direction,
 
-        start: start,
+        sizeInch:
+          line.sizeInch,
 
-        end: end,
+        sizeMM:
+          line.sizeMM,
 
-        bendPoint:
-          bendPoint,
+        bendAllowanceInch:
+          line.bendAllowanceInch,
 
-        directionVector:
-          normalize(
-            direction
-          ),
+        bendDeductionInch:
+          line.bendDeductionInch
+      });
 
-        bendAxis:
-          normalize(axis),
-
-        surfaceNormal:
-          normalize(normal),
-
-        bendAllowance:
-          line.bendAllowance,
-
-        bendDeduction:
-          line.bendDeduction,
-
-        nextDirection: null,
-
-        nextNormal: null
+      current = {
+        position: end,
+        axis: direction.axis,
+        normal: direction.normal
       };
-
-      if (
-        i <
-        lines.length - 1
-      ) {
-        var sign =
-          line.direction ===
-          "UP"
-            ? 1
-            : -1;
-
-        var angle =
-          degToRad(
-            line.effectiveAngleDeg
-          ) * sign;
-
-        var nextDirection =
-          rotateVector(
-            direction,
-            axis,
-            angle
-          );
-
-        nextDirection =
-          normalize(
-            nextDirection
-          );
-
-        var nextNormal =
-          normalize(
-            cross(
-              axis,
-              nextDirection
-            )
-          );
-
-        if (
-          length(nextNormal) <
-          EPS
-        ) {
-          nextNormal =
-            normal;
-        }
-
-        bendRecord.nextDirection =
-          nextDirection;
-
-        bendRecord.nextNormal =
-          nextNormal;
-
-        direction =
-          nextDirection;
-
-        normal =
-          nextNormal;
-      }
-
-      output.push(
-        bendRecord
-      );
-
-      cursor =
-        end;
     }
+
+    return {
+      records: records,
+      finalPosition:
+        clone(current.position)
+    };
   }
 
-  /* =========================================================
+  /* =======================================================
      BEND ZONE
-     ========================================================= */
+     ======================================================= */
 
-  function bendZone(
-    line,
-    settings
-  ) {
-    var r =
-      settings.radiusMm;
-
-    var t =
-      settings.thicknessMm;
+  function bendZone(line, settings) {
+    var radius =
+      settings.radius +
+      settings.thickness;
 
     var relief =
-      settings.reliefMm;
-
-    var angle =
-      line.effectiveAngleDeg;
-
-    var effectiveRadius =
-      r + t;
-
-    var factor =
-      Math.sin(
-        Math.min(
-          180,
-          angle
-        ) *
-          Math.PI /
-          360
-      );
-
-    var zoneMm =
-      effectiveRadius *
-      (1 + factor) +
-      relief;
-
-    zoneMm =
       Math.max(
-        zoneMm,
-        t
+        settings.relief,
+        settings.thickness
       );
+
+    /*
+      Influence zone around the crossing.
+    */
+
+    var half =
+      radius + relief;
 
     return {
-      radiusMm:
-        round(
-          r,
-          4
-        ),
+      radiusMM:
+        round(radius, 4),
 
-      thicknessMm:
-        round(
-          t,
-          4
-        ),
+      radiusInch:
+        round(mmToInch(radius), 6),
 
-      effectiveRadiusMm:
-        round(
-          effectiveRadius,
-          4
-        ),
+      reliefMM:
+        round(relief, 4),
 
-      angleDeg:
-        round(
-          angle,
-          4
-        ),
+      reliefInch:
+        round(mmToInch(relief), 6),
 
-      zoneMm:
-        round(
-          zoneMm,
-          4
-        ),
+      halfZoneMM:
+        round(half, 4),
 
-      zoneIn:
-        round(
-          mmToInch(zoneMm),
-          6
-        )
+      halfZoneInch:
+        round(mmToInch(half), 6)
     };
   }
 
-  /* =========================================================
-     2D LINE INTERSECTION
-     ========================================================= */
+  /* =======================================================
+     DIRECTION / ANGLE ANALYSIS
+     ======================================================= */
 
-  function lineIntersection2D(
-    a1,
-    a2,
-    b1,
-    b2
-  ) {
-    var x1 = a1.x;
-    var y1 = a1.y;
+  function angleBetween(a, b) {
+    var na = normalize(a);
+    var nb = normalize(b);
 
-    var x2 = a2.x;
-    var y2 = a2.y;
-
-    var x3 = b1.x;
-    var y3 = b1.y;
-
-    var x4 = b2.x;
-    var y4 = b2.y;
-
-    var den =
-      (x1 - x2) *
-        (y3 - y4) -
-      (y1 - y2) *
-        (x3 - x4);
+    var la = length(na);
+    var lb = length(nb);
 
     if (
-      Math.abs(den) <
-      EPS
+      la < EPS ||
+      lb < EPS
     ) {
-      return null;
+      return 0;
     }
-
-    var px =
-      (
-        (x1 * y2 -
-          y1 * x2) *
-          (x3 - x4) -
-        (x1 - x2) *
-          (x3 * y4 -
-            y3 * x4)
-      ) / den;
-
-    var py =
-      (
-        (x1 * y2 -
-          y1 * x2) *
-          (y3 - y4) -
-        (y1 - y2) *
-          (x3 * y4 -
-            y3 * x4)
-      ) / den;
-
-    return {
-      x: px,
-      y: py
-    };
-  }
-
-  /* =========================================================
-     ANGLE BETWEEN 3D DIRECTIONS
-     ========================================================= */
-
-  function directionAngle(
-    a,
-    b
-  ) {
-    var aa =
-      normalize(a);
-
-    var bb =
-      normalize(b);
 
     var d =
       clamp(
-        Math.abs(
-          dot(aa, bb)
-        ),
-        0,
+        dot(na, nb),
+        -1,
         1
       );
 
@@ -996,1202 +898,906 @@
     );
   }
 
-  /* =========================================================
-     RELATIVE MOVEMENT
-     ========================================================= */
+  function movementStrength(a, b) {
+    var na = normalize(a);
+    var nb = normalize(b);
 
-  function movementStrength(
-    a,
-    b
-  ) {
-    var r =
-      sub(
-        normalize(a),
-        normalize(b)
-      );
-
-    return length(r);
+    return clamp(
+      length(
+        sub(na, nb)
+      ) / 2,
+      0,
+      1
+    );
   }
 
-  /* =========================================================
-     NOTCH GEOMETRY
-     ========================================================= */
-
-  function makeNotch(
-    center,
-    widthIn,
-    depthIn,
-    orientation
-  ) {
-    var w =
-      Math.max(
-        widthIn,
-        1 / 32
-      );
-
-    var d =
-      Math.max(
-        depthIn,
-        1 / 32
-      );
-
-    var hw =
-      w / 2;
-
-    var hd =
-      d / 2;
-
-    var points = [
-      {
-        x:
-          center.x - hw,
-        y:
-          center.y - hd
-      },
-
-      {
-        x:
-          center.x + hw,
-        y:
-          center.y - hd
-      },
-
-      {
-        x:
-          center.x + hw,
-        y:
-          center.y + hd
-      },
-
-      {
-        x:
-          center.x - hw,
-        y:
-          center.y + hd
-      }
-    ];
-
-    return {
-      type:
-        "RECTANGULAR_RELIEF",
-
-      orientation:
-        orientation,
-
-      center: {
-        x:
-          round(
-            center.x,
-            6
-          ),
-        y:
-          round(
-            center.y,
-            6
-          )
-      },
-
-      widthIn:
-        round(
-          w,
-          6
-        ),
-
-      depthIn:
-        round(
-          d,
-          6
-        ),
-
-      widthMm:
-        round(
-          inchToMm(w),
-          3
-        ),
-
-      depthMm:
-        round(
-          inchToMm(d),
-          3
-        ),
-
-      corners:
-        points.map(
-          function (p) {
-            return {
-              x:
-                round(
-                  p.x,
-                  6
-                ),
-              y:
-                round(
-                  p.y,
-                  6
-                )
-            };
-          }
-        ),
-
-      polygon: [
-        [
-          [
-            round(
-              points[0].x,
-              6
-            ),
-            round(
-              points[0].y,
-              6
-            )
-          ],
-
-          [
-            round(
-              points[1].x,
-              6
-            ),
-            round(
-              points[1].y,
-              6
-            )
-          ],
-
-          [
-            round(
-              points[2].x,
-              6
-            ),
-            round(
-              points[2].y,
-              6
-            )
-          ],
-
-          [
-            round(
-              points[3].x,
-              6
-            ),
-            round(
-              points[3].y,
-              6
-            )
-          ],
-
-          [
-            round(
-              points[0].x,
-              6
-            ),
-            round(
-              points[0].y,
-              6
-            )
-          ]
-        ]
-      ]
-    };
-  }
-
-  /* =========================================================
-     COMPLETE INTERACTION
-     ========================================================= */
+  /* =======================================================
+     INTERACTION ENGINE
+     ======================================================= */
 
   function calculateInteraction(
-    L,
-    D,
-    L3D,
-    D3D,
+    lengthLine,
+    depthLine,
     settings
   ) {
     var lZone =
       bendZone(
-        L,
+        lengthLine,
         settings
       );
 
     var dZone =
       bendZone(
-        D,
+        depthLine,
         settings
       );
 
-    var angle3D =
-      directionAngle(
-        L3D.directionVector,
-        D3D.directionVector
+    var angleDifference =
+      Math.abs(
+        lengthLine.effectiveAngle -
+        depthLine.effectiveAngle
       );
 
-    var movement =
-      movementStrength(
-        L3D.directionVector,
-        D3D.directionVector
-      );
+    var directionDifference =
+      lengthLine.direction ===
+      depthLine.direction
+        ? 0
+        : 180;
 
-    var sameDirection =
-      L.direction ===
-      D.direction;
-
-    var directionFactor =
-      sameDirection
-        ? 0.65
-        : 1.0;
+    /*
+      Combined bend demand.
+      This is deliberately separated from the
+      physical cut decision so the result can explain
+      why a cut was or was not requested.
+    */
 
     var totalAngle =
       Math.min(
         180,
-        L.effectiveAngleDeg +
-          D.effectiveAngleDeg
+        Math.abs(
+          lengthLine.effectiveAngle +
+          depthLine.effectiveAngle
+        )
+      );
+
+    var localAngle =
+      Math.max(
+        angleDifference,
+        Math.abs(
+          lengthLine.effectiveAngle
+          -
+          depthLine.effectiveAngle
+        )
+      );
+
+    var radiusInch =
+      Math.max(
+        lZone.halfZoneInch,
+        dZone.halfZoneInch
+      );
+
+    /*
+      Corner relief requirement.
+
+      Strong interference cases:
+      - both bends have real angle
+      - crossing lies inside the bend influence zone
+      - directions create material collision
+    */
+
+    var activeLength =
+      lengthLine.effectiveAngle > 0;
+
+    var activeDepth =
+      depthLine.effectiveAngle > 0;
+
+    var directionConflict =
+      lengthLine.direction !==
+      depthLine.direction;
+
+    var highAngle =
+      totalAngle >= 90;
+
+    var meaningfulBend =
+      activeLength &&
+      activeDepth;
+
+    var required =
+      meaningfulBend &&
+      (
+        highAngle ||
+        directionConflict
+      );
+
+    /*
+      Cut dimensions.
+
+      Base relief is never smaller than material
+      thickness and user relief setting.
+    */
+
+    var baseReliefMM =
+      Math.max(
+        settings.relief,
+        settings.thickness
       );
 
     var angleFactor =
-      Math.sin(
-        degToRad(
-          totalAngle
-        ) / 2
-      );
-
-    var combinedZone =
-      lZone.zoneIn +
-      dZone.zoneIn;
-
-    var rawOverlap =
-      combinedZone *
-      angleFactor *
-      directionFactor *
-      Math.max(
-        0.15,
-        movement
-      );
-
-    if (
-      L.effectiveAngleDeg <
-      20
-    ) {
-      rawOverlap *=
-        0.25;
-    }
-
-    if (
-      D.effectiveAngleDeg <
-      20
-    ) {
-      rawOverlap *=
-        0.25;
-    }
-
-    var thicknessIn =
-      mmToInch(
-        settings.thicknessMm
-      );
-
-    var relief =
-      Math.max(
+      clamp(
+        totalAngle / 90,
         0,
-        rawOverlap -
-          thicknessIn * 0.5
+        2
       );
 
-    var minimumCut =
-      1 / 16;
+    var calculatedWidthMM =
+      baseReliefMM +
+      (
+        settings.thickness *
+        angleFactor
+      );
 
-    if (
-      relief <
-      minimumCut
-    ) {
-      relief = 0;
-    }
-
-    var maximumCut =
+    var calculatedDepthMM =
       Math.max(
-        thicknessIn * 4,
-        1 / 8
+        settings.relief,
+        settings.thickness +
+        (
+          Math.min(
+            settings.radius,
+            settings.thickness * 2
+          )
+        )
       );
 
-    relief =
-      Math.min(
-        relief,
-        maximumCut
+    /*
+      Never create a negative or microscopic cut.
+    */
+
+    calculatedWidthMM =
+      Math.max(
+        calculatedWidthMM,
+        settings.thickness
       );
 
-    var required =
-      relief > 0;
+    calculatedDepthMM =
+      Math.max(
+        calculatedDepthMM,
+        settings.thickness
+      );
+
+    var orientation =
+      highAngle
+        ? "CROSS_RELIEF"
+        : "LOCAL_RELIEF";
+
+    var reason = "NO_INTERFERENCE";
+
+    if (required) {
+      if (directionConflict && highAngle) {
+        reason =
+          "OPPOSITE_DIRECTION_HIGH_ANGLE";
+      } else if (directionConflict) {
+        reason =
+          "OPPOSITE_BEND_DIRECTION";
+      } else if (highAngle) {
+        reason =
+          "HIGH_COMBINED_BEND_ANGLE";
+      } else {
+        reason =
+          "BEND_INTERACTION";
+      }
+    }
 
     return {
-      required:
-        required,
+      lengthId:
+        lengthLine.id,
 
-      directionRelation:
-        sameDirection
-          ? "SAME"
-          : "OPPOSITE",
+      depthId:
+        depthLine.id,
 
-      directionAngleDeg:
-        round(
-          angle3D,
-          4
-        ),
+      lengthAngle:
+        lengthLine.effectiveAngle,
+
+      depthAngle:
+        depthLine.effectiveAngle,
+
+      lengthDirection:
+        lengthLine.direction,
+
+      depthDirection:
+        depthLine.direction,
+
+      angleDifference:
+        round(angleDifference, 3),
+
+      directionDifference:
+        directionDifference,
+
+      totalAngle:
+        round(totalAngle, 3),
+
+      localAngle:
+        round(localAngle, 3),
 
       movementStrength:
         round(
-          movement,
-          6
+          Math.max(
+            movementStrength(
+              {
+                x: lengthLine.effectiveAngle,
+                y: lengthLine.direction === "up" ? 1 : -1,
+                z: 0
+              },
+              {
+                x: depthLine.effectiveAngle,
+                y: depthLine.direction === "up" ? 1 : -1,
+                z: 0
+              }
+            ),
+            0
+          ),
+          4
         ),
 
-      lengthZoneIn:
-        round(
-          lZone.zoneIn,
-          6
-        ),
+      required:
+        required,
 
-      depthZoneIn:
-        round(
-          dZone.zoneIn,
-          6
-        ),
+      orientation:
+        orientation,
 
-      combinedZoneIn:
-        round(
-          combinedZone,
-          6
-        ),
+      reason:
+        reason,
 
-      angleFactor:
-        round(
-          angleFactor,
-          6
-        ),
+      cutWidthMM:
+        required
+          ? round(calculatedWidthMM, 3)
+          : 0,
 
-      directionFactor:
-        round(
-          directionFactor,
-          6
-        ),
+      cutDepthMM:
+        required
+          ? round(calculatedDepthMM, 3)
+          : 0,
 
-      rawOverlapIn:
-        round(
-          rawOverlap,
-          6
-        ),
+      cutWidthInch:
+        required
+          ? round(
+              mmToInch(calculatedWidthMM),
+              5
+            )
+          : 0,
 
-      requiredReliefIn:
-        round(
-          relief,
-          6
-        ),
+      cutDepthInch:
+        required
+          ? round(
+              mmToInch(calculatedDepthMM),
+              5
+            )
+          : 0,
 
-      requiredReliefMm:
-        round(
-          inchToMm(relief),
-          3
-        )
+      influenceRadiusInch:
+        round(radiusInch, 5)
     };
   }
 
-  /* =========================================================
-     BUILD ALL INTERSECTIONS
-     ========================================================= */
+  /* =======================================================
+     NOTCH / CUP CUT
+     ======================================================= */
+
+  function makeNotch(
+    interaction,
+    lengthPosition,
+    depthPosition
+  ) {
+    return {
+      id:
+        "CUT_" +
+        interaction.lengthId +
+        "_" +
+        interaction.depthId,
+
+      lengthId:
+        interaction.lengthId,
+
+      depthId:
+        interaction.depthId,
+
+      required:
+        interaction.required,
+
+      type:
+        "CUP_CUT",
+
+      orientation:
+        interaction.orientation,
+
+      reason:
+        interaction.reason,
+
+      xInch:
+        round(
+          lengthPosition,
+          6
+        ),
+
+      yInch:
+        round(
+          depthPosition,
+          6
+        ),
+
+      widthMM:
+        interaction.cutWidthMM,
+
+      depthMM:
+        interaction.cutDepthMM,
+
+      widthInch:
+        interaction.cutWidthInch,
+
+      depthInch:
+        interaction.cutDepthInch,
+
+      hidden:
+        false
+    };
+  }
+
+  /* =======================================================
+     INTERSECTIONS
+     ======================================================= */
 
   function buildIntersections(
-    network,
-    network3D,
+    lengthLines,
+    depthLines,
+    flat,
     settings
   ) {
-    var results = [];
+    var intersections = [];
+    var cuts = [];
 
     for (
-      var li = 0;
-      li < network.length.length;
-      li++
+      var i = 0;
+      i < lengthLines.length;
+      i++
     ) {
       var L =
-        network.length[li];
+        lengthLines[i];
 
-      var L3D =
-        network3D.length[li];
+      var lPos =
+        flat.lengthPositions[i]
+          ? flat.lengthPositions[i].positionInch
+          : 0;
 
       for (
-        var di = 0;
-        di < network.depth.length;
-        di++
+        var j = 0;
+        j < depthLines.length;
+        j++
       ) {
         var D =
-          network.depth[di];
+          depthLines[j];
 
-        var D3D =
-          network3D.depth[di];
-
-        if (!L || !D) {
-          continue;
-        }
-
-        var center = {
-          x:
-            L.positionInch,
-
-          y:
-            D.positionInch
-        };
+        var dPos =
+          flat.depthPositions[j]
+            ? flat.depthPositions[j].positionInch
+            : 0;
 
         var interaction =
           calculateInteraction(
             L,
             D,
-            L3D,
-            D3D,
             settings
           );
 
-        var cut = null;
-
-        if (
-          interaction.required
-        ) {
-          var width =
-            interaction.requiredReliefIn;
-
-          var depth =
-            interaction.requiredReliefIn;
-
-          var orientation =
-            Math.max(
-              L.effectiveAngleDeg,
-              D.effectiveAngleDeg
-            ) >= 90
-              ? "CROSS_RELIEF"
-              : "LOCAL_RELIEF";
-
-          cut =
-            makeNotch(
-              center,
-              width,
-              depth,
-              orientation
-            );
-        }
-
-        results.push({
+        var intersection = {
           id:
+            "X_" +
             L.id +
-            "x" +
+            "_" +
             D.id,
 
-          lenIndex:
-            L.index,
+          lengthId:
+            L.id,
 
-          depIndex:
-            D.index,
+          depthId:
+            D.id,
 
-          position: {
-            x:
-              round(
-                center.x,
-                6
-              ),
+          xInch:
+            round(lPos, 6),
 
-            y:
-              round(
-                center.y,
-                6
-              )
-          },
+          yInch:
+            round(dPos, 6),
 
-          lengthBend: {
-            id:
-              L.id,
+          xMM:
+            round(inchToMM(lPos), 4),
 
-            sequence:
-              L.sequence,
-
-            sizeInch:
-              L.sizeInch,
-
-            angleDeg:
-              L.angleDeg,
-
-            effectiveAngleDeg:
-              L.effectiveAngleDeg,
-
-            direction:
-              L.direction,
-
-            bendAllowance:
-              L.bendAllowance,
-
-            bendDeduction:
-              L.bendDeduction
-          },
-
-          depthBend: {
-            id:
-              D.id,
-
-            sequence:
-              D.sequence,
-
-            sizeInch:
-              D.sizeInch,
-
-            angleDeg:
-              D.angleDeg,
-
-            effectiveAngleDeg:
-              D.effectiveAngleDeg,
-
-            direction:
-              D.direction,
-
-            bendAllowance:
-              D.bendAllowance,
-
-            bendDeduction:
-              D.bendDeduction
-          },
+          yMM:
+            round(inchToMM(dPos), 4),
 
           interaction:
             interaction,
 
-          interference:
-            interaction.required,
-
-          cut: cut
-            ? {
-                required: true,
-
-                type:
-                  "NOTCH",
-
-                shape:
-                  cut.type,
-
-                widthIn:
-                  cut.widthIn,
-
-                depthIn:
-                  cut.depthIn,
-
-                widthMm:
-                  cut.widthMm,
-
-                depthMm:
-                  cut.depthMm,
-
-                center:
-                  cut.center,
-
-                corners:
-                  cut.corners,
-
-                polygon:
-                  cut.polygon
-              }
-            : {
-                required: false,
-
-                type:
-                  "NONE",
-
-                shape:
-                  "NONE",
-
-                widthIn: 0,
-
-                depthIn: 0,
-
-                widthMm: 0,
-
-                depthMm: 0,
-
-                center:
-                  center,
-
-                corners: [],
-
-                polygon: null
-              },
-
-          status:
+          cutRequired:
             interaction.required
-              ? "AUTO_CUT_REQUIRED"
-              : "NO_CUT"
-        });
+        };
+
+        if (interaction.required) {
+          var cut =
+            makeNotch(
+              interaction,
+              lPos,
+              dPos
+            );
+
+          intersection.cut =
+            cut;
+
+          cuts.push(cut);
+        } else {
+          intersection.cut = null;
+        }
+
+        intersections.push(
+          intersection
+        );
       }
     }
 
-    return results;
+    return {
+      intersections:
+        intersections,
+
+      cuts:
+        cuts
+    };
   }
 
-  /* =========================================================
-     COMPLETE FLAT SHEET OUTLINE
-     ========================================================= */
+  /* =======================================================
+     SHEET OUTLINE
+     ======================================================= */
 
-  function buildSheetOutline(
-    widthIn,
-    heightIn
-  ) {
+  function buildSheetOutline(flat) {
     return {
-      type:
-        "RECTANGULAR_SHEET",
+      widthInch:
+        flat.totalLengthInch,
 
-      widthIn:
-        round(
-          widthIn,
-          6
-        ),
+      heightInch:
+        flat.totalDepthInch,
 
-      heightIn:
-        round(
-          heightIn,
-          6
-        ),
+      widthMM:
+        flat.totalLengthMM,
 
-      widthMm:
-        round(
-          inchToMm(widthIn),
-          3
-        ),
+      heightMM:
+        flat.totalDepthMM,
 
-      heightMm:
-        round(
-          inchToMm(heightIn),
-          3
-        ),
-
-      corners: [
+      points: [
         {
           x: 0,
           y: 0
         },
-
         {
-          x:
-            round(
-              widthIn,
-              6
-            ),
+          x: flat.totalLengthInch,
           y: 0
         },
-
         {
-          x:
-            round(
-              widthIn,
-              6
-            ),
-          y:
-            round(
-              heightIn,
-              6
-            )
+          x: flat.totalLengthInch,
+          y: flat.totalDepthInch
         },
-
         {
           x: 0,
-          y:
-            round(
-              heightIn,
-              6
-            )
+          y: flat.totalDepthInch
         }
       ]
     };
   }
 
-  /* =========================================================
+  /* =======================================================
      CUT SUMMARY
-     ========================================================= */
+     ======================================================= */
 
   function buildCutSummary(
-    intersections
+    cuts
   ) {
-    return intersections
-      .filter(
-        function (x) {
-          return (
-            x.cut &&
-            x.cut.required
-          );
-        }
-      )
-      .map(
-        function (x) {
-          return {
-            id: x.id,
-
-            position:
-              x.position,
-
-            widthIn:
-              x.cut.widthIn,
-
-            depthIn:
-              x.cut.depthIn,
-
-            widthMm:
-              x.cut.widthMm,
-
-            depthMm:
-              x.cut.depthMm,
-
-            type:
-              x.cut.type,
-
-            shape:
-              x.cut.shape,
-
-            corners:
-              x.cut.corners
-          };
+    var required =
+      cuts.filter(
+        function (c) {
+          return c.required;
         }
       );
-  }
 
-  /* =========================================================
-     BEND SEQUENCE
-     ========================================================= */
-
-  function buildSequence(
-    network
-  ) {
-    var all = [];
-
-    network.length.forEach(
-      function (x) {
-        all.push({
-          id: x.id,
-
-          side:
-            "LENGTH",
-
-          index:
-            x.index,
-
-          sequence:
-            x.sequence,
-
-          sizeInch:
-            x.sizeInch,
-
-          angleDeg:
-            x.angleDeg,
-
-          effectiveAngleDeg:
-            x.effectiveAngleDeg,
-
-          direction:
-            x.direction
-        });
-      }
-    );
-
-    network.depth.forEach(
-      function (x) {
-        all.push({
-          id: x.id,
-
-          side:
-            "DEPTH",
-
-          index:
-            x.index,
-
-          sequence:
-            x.sequence,
-
-          sizeInch:
-            x.sizeInch,
-
-          angleDeg:
-            x.angleDeg,
-
-          effectiveAngleDeg:
-            x.effectiveAngleDeg,
-
-          direction:
-            x.direction
-        });
-      }
-    );
-
-    return all;
-  }
-
-  /* =========================================================
-     EMPTY RESULT — jab data hi na ho
-     ========================================================= */
-
-  function khaaliResult(settings) {
     return {
-      version:
-        "geometry-v3",
+      total:
+        cuts.length,
 
-      settings: {
-        thicknessMm:
-          settings.thicknessMm,
+      required:
+        required.length,
 
-        radiusMm:
-          settings.radiusMm,
+      none:
+        cuts.length -
+        required.length,
 
-        kFactor:
-          settings.kFactor,
-
-        springback:
-          settings.springback,
-
-        reliefMm:
-          settings.reliefMm
-      },
-
-      input: {
-        lengthLines: [],
-        depthLines: []
-      },
-
-      sheet:
-        buildSheetOutline(0, 0),
-
-      model3D: {
-        length: [],
-        depth: []
-      },
-
-      sequence: [],
-
-      intersections: [],
-
-      cuts: [],
-
-      statistics: {
-        totalLengthLines: 0,
-        totalDepthLines: 0,
-        totalIntersections: 0,
-        cutCount: 0,
-        noCutCount: 0
-      }
+      items:
+        cuts.map(
+          function (c) {
+            return {
+              id: c.id,
+              lengthId: c.lengthId,
+              depthId: c.depthId,
+              widthInch: c.widthInch,
+              depthInch: c.depthInch,
+              widthMM: c.widthMM,
+              depthMM: c.depthMM,
+              orientation: c.orientation,
+              reason: c.reason
+            };
+          }
+        )
     };
   }
 
-  /* =========================================================
-     MAIN ANALYZE
-     ========================================================= */
+  /* =======================================================
+     BEND SEQUENCE
+     ======================================================= */
 
-  function analyze() {
-    var state =
-      window.state || {};
+  function buildSequence(
+    lengthLines,
+    depthLines
+  ) {
+    var sequence = [];
 
-    var lenLines =
-      Array.isArray(
-        state.lenLines
-      )
-        ? state.lenLines
-        : [];
+    /*
+      Existing app behaviour is preserved:
+      Length bends first, then Depth bends.
+      Each record carries complete engineering data.
+    */
 
-    var depLines =
-      Array.isArray(
-        state.depLines
-      )
-        ? state.depLines
-        : [];
+    for (
+      var i = 0;
+      i < lengthLines.length;
+      i++
+    ) {
+      sequence.push({
+        step:
+          sequence.length + 1,
+
+        id:
+          lengthLines[i].id,
+
+        side:
+          "length",
+
+        angle:
+          lengthLines[i].angle,
+
+        effectiveAngle:
+          lengthLines[i].effectiveAngle,
+
+        direction:
+          lengthLines[i].direction,
+
+        sizeInch:
+          lengthLines[i].sizeInch,
+
+        BAInch:
+          lengthLines[i].bendAllowanceInch,
+
+        BDInch:
+          lengthLines[i].bendDeductionInch
+      });
+    }
+
+    for (
+      var j = 0;
+      j < depthLines.length;
+      j++
+    ) {
+      sequence.push({
+        step:
+          sequence.length + 1,
+
+        id:
+          depthLines[j].id,
+
+        side:
+          "depth",
+
+        angle:
+          depthLines[j].angle,
+
+        effectiveAngle:
+          depthLines[j].effectiveAngle,
+
+        direction:
+          depthLines[j].direction,
+
+        sizeInch:
+          depthLines[j].sizeInch,
+
+        BAInch:
+          depthLines[j].bendAllowanceInch,
+
+        BDInch:
+          depthLines[j].bendDeductionInch
+      });
+    }
+
+    return sequence;
+  }
+
+  /* =======================================================
+     MASTER ANALYSIS
+     ======================================================= */
+
+  function analyze(state) {
+    state = state || {};
 
     var settings =
       getSettings();
 
-    // Agar dono khaali hain to khaali result do
-    if (
-      !lenLines.length &&
-      !depLines.length
-    ) {
-      return khaaliResult(settings);
-    }
+    var lengthInput =
+      Array.isArray(state.lenLines)
+        ? state.lenLines
+        : [];
 
-    var network =
-      buildFlatNetwork(
-        lenLines,
-        depLines,
-        settings
+    var depthInput =
+      Array.isArray(state.depLines)
+        ? state.depLines
+        : [];
+
+    var lengthLines =
+      lengthInput.map(
+        function (line, index) {
+          return createLineData(
+            line,
+            "length",
+            index,
+            settings
+          );
+        }
       );
 
-    var network3D =
-      build3DNetwork(
-        network,
-        settings
+    var depthLines =
+      depthInput.map(
+        function (line, index) {
+          return createLineData(
+            line,
+            "depth",
+            index,
+            settings
+          );
+        }
+      );
+
+    var flat =
+      buildFlatNetwork(
+        lengthLines,
+        depthLines
       );
 
     var intersections =
       buildIntersections(
-        network,
-        network3D,
+        lengthLines,
+        depthLines,
+        flat,
         settings
       );
 
-    var cuts =
-      buildCutSummary(
-        intersections
+    var threeD =
+      build3DNetwork(
+        lengthLines,
+        depthLines
       );
 
     var sheet =
-      buildSheetOutline(
-        network.totalLengthIn,
-        network.totalDepthIn
-      );
+      buildSheetOutline(flat);
 
     var sequence =
       buildSequence(
-        network
+        lengthLines,
+        depthLines
       );
+
+    var cutSummary =
+      buildCutSummary(
+        intersections.cuts
+      );
+
+    var totalBends =
+      lengthLines.length +
+      depthLines.length;
 
     return {
       version:
-        "geometry-v3",
+        "GEOMETRY_ENGINE_V4",
 
-      settings: {
-        thicknessMm:
-          settings.thicknessMm,
-
-        radiusMm:
-          settings.radiusMm,
-
-        kFactor:
-          settings.kFactor,
-
-        springback:
-          settings.springback,
-
-        reliefMm:
-          settings.reliefMm
-      },
+      settings:
+        clone(settings),
 
       input: {
         lengthLines:
-          network.length,
+          clone(lengthInput),
 
         depthLines:
-          network.depth
+          clone(depthInput)
       },
+
+      lengthLines:
+        lengthLines,
+
+      depthLines:
+        depthLines,
+
+      totals: {
+        length:
+          flat.totalLengthInch,
+
+        depth:
+          flat.totalDepthInch,
+
+        lengthMM:
+          flat.totalLengthMM,
+
+        depthMM:
+          flat.totalDepthMM,
+
+        lengthLines:
+          lengthLines.length,
+
+        depthLines:
+          depthLines.length,
+
+        totalBends:
+          totalBends,
+
+        corners:
+          intersections.intersections.length,
+
+        cupCuts:
+          cutSummary.required
+      },
+
+      flat:
+        flat,
 
       sheet:
         sheet,
 
-      model3D: {
-        length:
-          network3D.length,
-
-        depth:
-          network3D.depth
-      },
-
-      sequence:
-        sequence,
-
       intersections:
-        intersections,
+        intersections.intersections,
 
       cuts:
-        cuts,
+        intersections.cuts,
 
-      statistics: {
-        totalLengthLines:
-          network.length.length,
+      cutSummary:
+        cutSummary,
 
-        totalDepthLines:
-          network.depth.length,
+      threeD:
+        threeD,
 
-        totalIntersections:
-          intersections.length,
-
-        cutCount:
-          cuts.length,
-
-        noCutCount:
-          intersections.length -
-          cuts.length
-      }
+      sequence:
+        sequence
     };
   }
 
-  /* =========================================================
-     GET ONE INTERSECTION / CUT — safe
-     ========================================================= */
+  /* =======================================================
+     SINGLE LINE CALCULATION
+     ======================================================= */
 
-  function getCut(
-    lenIndex,
-    depIndex,
-    analysis
+  function calculateLine(
+    line
   ) {
-    var data =
-      analysis ||
-      analyze();
+    return createLineData(
+      line,
+      line && line.side === "depth"
+        ? "depth"
+        : "length",
+      num(line && line.index, 0),
+      getSettings()
+    );
+  }
 
-    if (
-      !data ||
-      !Array.isArray(
-        data.intersections
-      )
-    ) {
-      return null;
-    }
+  /* =======================================================
+     DEBUG
+     ======================================================= */
 
-    for (
-      var i = 0;
-      i <
-      data.intersections.length;
-      i++
-    ) {
-      var item =
-        data.intersections[i];
+  function debug(state) {
+    try {
+      var result =
+        analyze(state);
+
+      console.log(
+        "[GeometryEngine V4]",
+        result
+      );
+
+      return result;
+    } catch (err) {
+      console.error(
+        "[GeometryEngine]",
+        err
+      );
 
       if (
-        item.lenIndex ===
-          lenIndex &&
-        item.depIndex ===
-          depIndex
+        window.Bugs &&
+        typeof window.Bugs.capture === "function"
       ) {
-        return item;
+        window.Bugs.capture(
+          err,
+          "GeometryEngine"
+        );
       }
+
+      throw err;
     }
-
-    return null;
   }
 
-  /* =========================================================
-     DEBUG
-     ========================================================= */
-
-  function debug() {
-    var data =
-      analyze();
-
-    console.log(
-      "================================"
-    );
-
-    console.log(
-      " GEOMETRY ENGINE V3"
-    );
-
-    console.log(
-      "================================"
-    );
-
-    console.log(
-      "SETTINGS:",
-      data.settings
-    );
-
-    console.log(
-      "INPUT LENGTH:",
-      data.input.lengthLines
-    );
-
-    console.log(
-      "INPUT DEPTH:",
-      data.input.depthLines
-    );
-
-    console.log(
-      "SHEET:",
-      data.sheet
-    );
-
-    console.log(
-      "3D LENGTH:",
-      data.model3D.length
-    );
-
-    console.log(
-      "3D DEPTH:",
-      data.model3D.depth
-    );
-
-    console.log(
-      "SEQUENCE:",
-      data.sequence
-    );
-
-    console.log(
-      "ALL INTERSECTIONS:",
-      data.intersections
-    );
-
-    console.log(
-      "REQUIRED CUTS:",
-      data.cuts
-    );
-
-    console.log(
-      "STATISTICS:",
-      data.statistics
-    );
-
-    return data;
-  }
-
-  /* =========================================================
+  /* =======================================================
      PUBLIC API
-     ========================================================= */
+     ======================================================= */
 
   window.GeometryEngine = {
+
+    version:
+      "GEOMETRY_ENGINE_V4",
 
     analyze:
       analyze,
 
-    getCut:
-      getCut,
-
     debug:
       debug,
 
-    helpers: {
+    calculateLine:
+      calculateLine,
 
-      num:
-        num,
+    normalizeAngle:
+      normalizeAngle,
 
-      clamp:
-        clamp,
+    normalizeBend:
+      normalizeBend,
 
-      degToRad:
-        degToRad,
+    effectiveAngle:
+      effectiveAngle,
 
-      radToDeg:
-        radToDeg,
+    bendAllowance:
+      bendAllowance,
 
-      inchToMm:
-        inchToMm,
+    bendDeduction:
+      bendDeduction,
 
-      mmToInch:
-        mmToInch,
+    calculateBend:
+      calculateBend,
 
-      normalize:
-        normalize,
+    bendZone:
+      bendZone,
 
-      dot:
-        dot,
+    calculateInteraction:
+      calculateInteraction,
 
-      cross:
-        cross,
+    buildFlatNetwork:
+      buildFlatNetwork,
 
-      distance:
-        distance,
+    build3DNetwork:
+      build3DNetwork,
 
-      lerp:
-        lerp,
+    buildIntersections:
+      buildIntersections,
 
-      bendAllowance:
-        bendAllowance,
+    buildSequence:
+      buildSequence,
 
-      bendDeduction:
-        bendDeduction,
+    buildSheetOutline:
+      buildSheetOutline,
 
-      buildFlatNetwork:
-        buildFlatNetwork,
+    buildCutSummary:
+      buildCutSummary,
 
-      build3DNetwork:
-        build3DNetwork,
+    inchToMM:
+      inchToMM,
 
-      makeNotch:
-        makeNotch
-    }
+    mmToInch:
+      mmToInch
   };
+
+  console.log(
+    "✅ Geometry Engine V4 loaded"
+  );
 
 })();
