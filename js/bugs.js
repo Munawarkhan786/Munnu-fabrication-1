@@ -1,157 +1,413 @@
 /* =========================================================
-   BUGS — Error logger + viewer
-   Global error catch + localStorage save
+   BUGS.JS — Error Log System
+
+   Kaam:
+   1. JavaScript errors pakadna
+   2. Error count dikhana
+   3. Bugs panel mein errors dikhana
+   4. Errors clear karna
+   5. Main.js / UI.js ke liye simple API dena
+
+   HTML IDs:
+   bugs-toggle
+   bugs-count
+   bugs-panel
+   bugs-close
+   bugs-list
+   bugs-clear
    ========================================================= */
 
-(function() {
+(function () {
   "use strict";
 
-  var BUGS_KEY = "sheetMarking_bugs_v1";
-  var MAX_BUGS = 50;
+  // =========================================================
+  // INTERNAL ERROR LIST
+  // =========================================================
 
-  /* ---------- LOG ERROR ---------- */
+  var errors = [];
 
-  function log(source, message, stack) {
+  var MAX_ERRORS = 100;
 
-    var bug = {
-      time: new Date().toISOString(),
-      source: String(source || "unknown"),
+  // =========================================================
+  // ELEMENT SHORTCUT
+  // =========================================================
+
+  function getEl(id) {
+    return document.getElementById(id);
+  }
+
+  // =========================================================
+  // TIME
+  // =========================================================
+
+  function getTime() {
+    var now = new Date();
+
+    return now.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+  }
+
+  // =========================================================
+  // SAFE TEXT
+  // HTML injection se bachne ke liye
+  // =========================================================
+
+  function escapeHTML(value) {
+    return String(value == null ? "" : value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  // =========================================================
+  // ADD ERROR
+  // =========================================================
+
+  function addError(message, source, extra) {
+
+    var item = {
+      id: Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+      time: getTime(),
       message: String(message || "Unknown error"),
-      stack: String(stack || "")
+      source: String(source || "APP"),
+      extra: extra ? String(extra) : ""
     };
 
-    try {
-      var bugs = JSON.parse(localStorage.getItem(BUGS_KEY) || "[]");
-      bugs.unshift(bug);
-      if (bugs.length > MAX_BUGS) bugs = bugs.slice(0, MAX_BUGS);
-      localStorage.setItem(BUGS_KEY, JSON.stringify(bugs));
-    } catch (e) {}
+    errors.push(item);
 
-    console.warn("🐛 BUG:", source, message);
+    // Maximum limit
+    if (errors.length > MAX_ERRORS) {
+      errors.shift();
+    }
 
+    render();
+    updateBadge();
+
+    return item;
+  }
+
+  // =========================================================
+  // LOG
+  // =========================================================
+
+  function log(message, source, extra) {
+    return addError(message, source, extra);
+  }
+
+  // =========================================================
+  // ERROR OBJECT KO TEXT MEIN CONVERT KARNA
+  // =========================================================
+
+  function normalizeError(error) {
+
+    if (!error) {
+      return "Unknown error";
+    }
+
+    if (error instanceof Error) {
+      return error.message || error.name || "JavaScript Error";
+    }
+
+    if (typeof error === "object") {
+      try {
+        return JSON.stringify(error);
+      } catch (e) {
+        return "Unknown object error";
+      }
+    }
+
+    return String(error);
+  }
+
+  // =========================================================
+  // CATCH ERROR
+  // =========================================================
+
+  function capture(error, source, extra) {
+
+    var message = normalizeError(error);
+
+    return addError(
+      message,
+      source || "APP",
+      extra || ""
+    );
+  }
+
+  // =========================================================
+  // COUNT
+  // =========================================================
+
+  function count() {
+    return errors.length;
+  }
+
+  // =========================================================
+  // GET ALL
+  // =========================================================
+
+  function getAll() {
+    return errors.slice();
+  }
+
+  // =========================================================
+  // CLEAR
+  // =========================================================
+
+  function clear() {
+    errors = [];
+
+    render();
     updateBadge();
   }
 
-  /* ---------- GET ALL ---------- */
+  // =========================================================
+  // BADGE UPDATE
+  // =========================================================
 
-  function getAll() {
-    try {
-      return JSON.parse(localStorage.getItem(BUGS_KEY) || "[]");
-    } catch (e) {
-      return [];
+  function updateBadge() {
+
+    var toggle = getEl("bugs-toggle");
+    var badge = getEl("bugs-count");
+
+    if (badge) {
+      badge.textContent = String(errors.length);
+    }
+
+    if (toggle) {
+
+      if (errors.length > 0) {
+        toggle.style.display = "inline-flex";
+      } else {
+        toggle.style.display = "none";
+      }
+
     }
   }
 
-  /* ---------- COUNT ---------- */
-
-  function count() {
-    return getAll().length;
-  }
-
-  /* ---------- CLEAR ---------- */
-
-  function clear() {
-    try {
-      localStorage.removeItem(BUGS_KEY);
-    } catch (e) {}
-    updateBadge();
-    render();
-  }
-
-  /* ---------- BADGE ---------- */
-
-  function updateBadge() {
-    var badge = document.getElementById("bugs-count");
-    if (!badge) return;
-    var c = count();
-    badge.textContent = c;
-    badge.style.display = c > 0 ? "inline-block" : "none";
-  }
-
-  /* ---------- RENDER ---------- */
+  // =========================================================
+  // RENDER BUG LIST
+  // =========================================================
 
   function render() {
-    var container = document.getElementById("bugs-list");
-    if (!container) return;
 
-    var bugs = getAll();
+    var list = getEl("bugs-list");
 
-    if (!bugs.length) {
-      container.innerHTML =
-        '<div class="empty-hint">✅ Koi error nahi</div>';
+    if (!list) {
       return;
     }
 
-    container.innerHTML = bugs.map(function(bug, i) {
+    // No errors
+    if (errors.length === 0) {
 
-      var time = new Date(bug.time);
-      var timeStr = time.toLocaleString();
+      list.innerHTML =
+        '<div class="empty-hint">✅ Koi error nahi</div>';
 
-      return (
-        '<div class="result-box" ' +
-          'style="border-left-color:#dc2626;">' +
-          '<div class="corner-title">🐛 #' + (i + 1) + '</div>' +
-          '<div class="result-row">' +
-            '<span class="label">Time</span>' +
-            '<span class="value">' + timeStr + '</span>' +
-          '</div>' +
-          '<div class="result-row">' +
-            '<span class="label">Source</span>' +
-            '<span class="value red">' + bug.source + '</span>' +
-          '</div>' +
-          '<div class="result-row">' +
-            '<span class="label">Message</span>' +
-            '<span class="value">' + bug.message + '</span>' +
-          '</div>' +
-          '<details style="margin-top:8px;">' +
-            '<summary style="color:#888;font-size:11px;' +
-              'cursor:pointer;">📋 Stack</summary>' +
-            '<pre style="background:#0a0d14;padding:8px;' +
-              'border-radius:6px;font-size:9px;color:#aaa;' +
-              'overflow-x:auto;margin-top:6px;' +
-              'white-space:pre-wrap;">' +
-              bug.stack +
-            '</pre>' +
-          '</details>' +
-        '</div>'
-      );
-    }).join("");
+      return;
+    }
+
+    var html = "";
+
+    // Newest first
+    for (var i = errors.length - 1; i >= 0; i--) {
+
+      var item = errors[i];
+
+      html += '<div class="bug-item">';
+
+      html +=
+        '<div class="bug-top">' +
+          '<span class="bug-source">' +
+            escapeHTML(item.source) +
+          '</span>' +
+          '<span class="bug-time">' +
+            escapeHTML(item.time) +
+          '</span>' +
+        '</div>';
+
+      html +=
+        '<div class="bug-message">' +
+          '❌ ' +
+          escapeHTML(item.message) +
+        '</div>';
+
+      if (item.extra) {
+
+        html +=
+          '<div class="bug-extra">' +
+            escapeHTML(item.extra) +
+          '</div>';
+
+      }
+
+      html += '</div>';
+    }
+
+    list.innerHTML = html;
   }
 
-  /* ---------- GLOBAL ERROR CATCHER ---------- */
+  // =========================================================
+  // OPEN PANEL
+  // =========================================================
 
-  window.addEventListener("error", function(event) {
-    log(
-      event.filename || "unknown",
-      event.message,
-      event.error ? event.error.stack : ""
-    );
-  });
+  function openPanel() {
 
-  window.addEventListener("unhandledrejection", function(event) {
-    log(
-      "promise",
-      event.reason ? String(event.reason) : "Unhandled",
-      event.reason && event.reason.stack ? event.reason.stack : ""
-    );
-  });
+    var panel = getEl("bugs-panel");
 
-  /* ---------- INIT ---------- */
+    if (!panel) {
+      return;
+    }
 
-  function init() {
-    updateBadge();
+    panel.classList.remove("hidden");
+
     render();
   }
 
-  /* ---------- EXPOSE ---------- */
+  // =========================================================
+  // CLOSE PANEL
+  // =========================================================
+
+  function closePanel() {
+
+    var panel = getEl("bugs-panel");
+
+    if (!panel) {
+      return;
+    }
+
+    panel.classList.add("hidden");
+  }
+
+  // =========================================================
+  // BUTTON EVENTS
+  // =========================================================
+
+  function bindEvents() {
+
+    var toggle = getEl("bugs-toggle");
+    var close = getEl("bugs-close");
+    var clearBtn = getEl("bugs-clear");
+
+    if (toggle) {
+
+      toggle.addEventListener("click", function () {
+        openPanel();
+      });
+
+    }
+
+    if (close) {
+
+      close.addEventListener("click", function () {
+        closePanel();
+      });
+
+    }
+
+    if (clearBtn) {
+
+      clearBtn.addEventListener("click", function () {
+        clear();
+      });
+
+    }
+  }
+
+  // =========================================================
+  // GLOBAL JAVASCRIPT ERROR
+  // =========================================================
+
+  function installGlobalErrorHandler() {
+
+    window.addEventListener("error", function (event) {
+
+      // Apne logger se dobara error create na ho
+      if (!event) {
+        return;
+      }
+
+      var message =
+        event.message ||
+        "JavaScript error";
+
+      var source = "JS";
+
+      var extra = "";
+
+      if (event.filename) {
+        extra += event.filename;
+
+        if (event.lineno) {
+          extra += ":" + event.lineno;
+        }
+
+        if (event.colno) {
+          extra += ":" + event.colno;
+        }
+      }
+
+      addError(message, source, extra);
+    });
+
+    // Promise / async errors
+    window.addEventListener("unhandledrejection", function (event) {
+
+      var reason = event && event.reason;
+
+      addError(
+        normalizeError(reason),
+        "PROMISE",
+        "Unhandled Promise Rejection"
+      );
+
+    });
+  }
+
+  // =========================================================
+  // INIT
+  // =========================================================
+
+  function init() {
+
+    bindEvents();
+
+    installGlobalErrorHandler();
+
+    render();
+
+    updateBadge();
+  }
+
+  // =========================================================
+  // PUBLIC API
+  // =========================================================
 
   window.Bugs = {
+
+    init: init,
+
     log: log,
-    getAll: getAll,
+
+    capture: capture,
+
+    add: addError,
+
     count: count,
+
+    getAll: getAll,
+
     clear: clear,
+
     render: render,
-    init: init
+
+    open: openPanel,
+
+    close: closePanel
   };
 
 })();
