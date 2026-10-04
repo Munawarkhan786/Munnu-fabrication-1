@@ -228,7 +228,7 @@
   }
 
   /* =========================================================
-     SETTINGS
+     SETTINGS — with validation
      ========================================================= */
 
   function getSettings() {
@@ -237,37 +237,38 @@
 
     return {
       thicknessMm:
-        num(
-          s.thickness,
-          0.8
+        clamp(
+          num(s.thickness, 0.8),
+          0.1,
+          10
         ),
 
       radiusMm:
-        num(
-          s.radius,
-          0.8
+        clamp(
+          num(s.radius, 0.8),
+          0.1,
+          20
         ),
 
       kFactor:
         clamp(
-          num(
-            s.kfactor,
-            0.44
-          ),
+          num(s.kfactor, 0.44),
           0,
           1
         ),
 
       springback:
-        num(
-          s.springback,
-          0.5
+        clamp(
+          num(s.springback, 0.5),
+          0,
+          30
         ),
 
       reliefMm:
-        num(
-          s.relief,
-          1.6
+        clamp(
+          num(s.relief, 1.6),
+          0,
+          20
         )
     };
   }
@@ -287,21 +288,30 @@
       a = 90;
     }
 
+    if (a > 180) {
+      a = 180;
+    }
+
     return a;
   }
 
   function normalizeBend(line) {
-    return (
-      String(
-        line &&
-        line.bend
-          ? line.bend
-          : "up"
-      ).toLowerCase() ===
-      "down"
-    )
-      ? "DOWN"
-      : "UP";
+    var b = String(
+      line && line.bend
+        ? line.bend
+        : "up"
+    ).toLowerCase();
+
+    if (
+      b === "down" ||
+      b === "false" ||
+      b === "0" ||
+      b === "-1"
+    ) {
+      return "DOWN";
+    }
+
+    return "UP";
   }
 
   function effectiveAngle(
@@ -459,9 +469,12 @@
     var size =
       Math.max(
         0,
-        num(
-          line && line.size,
-          0
+        Math.min(
+          1000,
+          num(
+            line && line.size,
+            0
+          )
         )
       );
 
@@ -527,13 +540,6 @@
 
   /* =========================================================
      BUILD COMPLETE FLAT NETWORK
-     
-     This is IMPORTANT:
-
-     Length and Depth are first converted into
-     one common sheet coordinate system.
-
-     No separate calculation island.
      ========================================================= */
 
   function buildFlatNetwork(
@@ -624,16 +630,6 @@
 
   /* =========================================================
      COMPLETE 3D BEND NETWORK
-
-     Every line is processed in sequence.
-
-     We keep:
-       start
-       end
-       direction
-       bend axis
-       normal
-       next direction
      ========================================================= */
 
   function build3DNetwork(
@@ -676,10 +672,6 @@
         ? vec(1, 0, 0)
         : vec(0, 1, 0);
 
-    /*
-     * Bend axis is perpendicular to
-     * the current flat direction.
-     */
     var axis =
       side === "LENGTH"
         ? vec(0, 1, 0)
@@ -767,9 +759,6 @@
         nextNormal: null
       };
 
-      /*
-       * Next bend.
-       */
       if (
         i <
         lines.length - 1
@@ -797,9 +786,6 @@
             nextDirection
           );
 
-        /*
-         * Surface normal changes with bend.
-         */
         var nextNormal =
           normalize(
             cross(
@@ -840,9 +826,6 @@
 
   /* =========================================================
      BEND ZONE
-
-     Zone is the physical area around a bend
-     where another bend may interfere.
      ========================================================= */
 
   function bendZone(
@@ -861,15 +844,9 @@
     var angle =
       line.effectiveAngleDeg;
 
-    /*
-     * Radius + material thickness.
-     */
     var effectiveRadius =
       r + t;
 
-    /*
-     * Angle dependent expansion.
-     */
     var factor =
       Math.sin(
         Math.min(
@@ -885,9 +862,6 @@
       (1 + factor) +
       relief;
 
-    /*
-     * At least thickness.
-     */
     zoneMm =
       Math.max(
         zoneMm,
@@ -1041,10 +1015,6 @@
 
   /* =========================================================
      NOTCH GEOMETRY
-
-     We create an actual polygon in flat-sheet coordinates.
-
-     This is geometry DATA, not just a red line.
      ========================================================= */
 
   function makeNotch(
@@ -1071,12 +1041,6 @@
     var hd =
       d / 2;
 
-    /*
-     * Standard rectangular relief.
-     *
-     * orientation is retained so Flat/3D
-     * can later use directional relief.
-     */
     var points = [
       {
         x:
@@ -1232,13 +1196,6 @@
 
   /* =========================================================
      COMPLETE INTERACTION
-
-     IMPORTANT:
-
-     This function sees BOTH bend systems.
-
-     It does not calculate Length and Depth
-     as isolated systems.
      ========================================================= */
 
   function calculateInteraction(
@@ -1260,9 +1217,6 @@
         settings
       );
 
-    /*
-     * 3D direction interaction.
-     */
     var angle3D =
       directionAngle(
         L3D.directionVector,
@@ -1275,25 +1229,15 @@
         D3D.directionVector
       );
 
-    /*
-     * UP/DOWN relationship.
-     */
     var sameDirection =
       L.direction ===
       D.direction;
 
-    /*
-     * Opposite directions generally create
-     * a stronger crossing interaction.
-     */
     var directionFactor =
       sameDirection
         ? 0.65
         : 1.0;
 
-    /*
-     * Bend-angle interaction.
-     */
     var totalAngle =
       Math.min(
         180,
@@ -1308,16 +1252,10 @@
         ) / 2
       );
 
-    /*
-     * Combined physical zones.
-     */
     var combinedZone =
       lZone.zoneIn +
       dZone.zoneIn;
 
-    /*
-     * Overall interaction.
-     */
     var rawOverlap =
       combinedZone *
       angleFactor *
@@ -1327,10 +1265,6 @@
         movement
       );
 
-    /*
-     * Very small angles don't consume
-     * much material.
-     */
     if (
       L.effectiveAngleDeg <
       20
@@ -1352,9 +1286,6 @@
         settings.thicknessMm
       );
 
-    /*
-     * Required material relief.
-     */
     var relief =
       Math.max(
         0,
@@ -1362,9 +1293,6 @@
           thicknessIn * 0.5
       );
 
-    /*
-     * Minimum practical relief.
-     */
     var minimumCut =
       1 / 16;
 
@@ -1375,9 +1303,6 @@
       relief = 0;
     }
 
-    /*
-     * Safety maximum.
-     */
     var maximumCut =
       Math.max(
         thicknessIn * 4,
@@ -1466,8 +1391,6 @@
 
   /* =========================================================
      BUILD ALL INTERSECTIONS
-
-     Every Length bend × every Depth bend
      ========================================================= */
 
   function buildIntersections(
@@ -1484,12 +1407,6 @@
     ) {
       var L =
         network.length[li];
-
-      /*
-       * Last segment normally has no following bend.
-       * It can still participate in geometry,
-       * so we keep it in the complete network.
-       */
 
       var L3D =
         network3D.length[li];
@@ -1509,9 +1426,6 @@
           continue;
         }
 
-        /*
-         * Crossing position in flat sheet.
-         */
         var center = {
           x:
             L.positionInch,
@@ -1520,9 +1434,6 @@
             D.positionInch
         };
 
-        /*
-         * Complete interaction.
-         */
         var interaction =
           calculateInteraction(
             L,
@@ -1537,20 +1448,12 @@
         if (
           interaction.required
         ) {
-          /*
-           * Use interaction relief
-           * in both dimensions for now.
-           */
           var width =
             interaction.requiredReliefIn;
 
           var depth =
             interaction.requiredReliefIn;
 
-          /*
-           * Orientation based on the
-           * stronger bend.
-           */
           var orientation =
             Math.max(
               L.effectiveAngleDeg,
@@ -1846,8 +1749,6 @@
 
   /* =========================================================
      BEND SEQUENCE
-
-     Length + Depth are kept together.
      ========================================================= */
 
   function buildSequence(
@@ -1917,11 +1818,62 @@
   }
 
   /* =========================================================
+     EMPTY RESULT — jab data hi na ho
+     ========================================================= */
+
+  function khaaliResult(settings) {
+    return {
+      version:
+        "geometry-v3",
+
+      settings: {
+        thicknessMm:
+          settings.thicknessMm,
+
+        radiusMm:
+          settings.radiusMm,
+
+        kFactor:
+          settings.kFactor,
+
+        springback:
+          settings.springback,
+
+        reliefMm:
+          settings.reliefMm
+      },
+
+      input: {
+        lengthLines: [],
+        depthLines: []
+      },
+
+      sheet:
+        buildSheetOutline(0, 0),
+
+      model3D: {
+        length: [],
+        depth: []
+      },
+
+      sequence: [],
+
+      intersections: [],
+
+      cuts: [],
+
+      statistics: {
+        totalLengthLines: 0,
+        totalDepthLines: 0,
+        totalIntersections: 0,
+        cutCount: 0,
+        noCutCount: 0
+      }
+    };
+  }
+
+  /* =========================================================
      MAIN ANALYZE
-
-     THIS IS THE MAIN FUNCTION.
-
-     All user data enters here together.
      ========================================================= */
 
   function analyze() {
@@ -1945,10 +1897,14 @@
     var settings =
       getSettings();
 
-    /*
-     * STEP 1
-     * Build complete common network.
-     */
+    // Agar dono khaali hain to khaali result do
+    if (
+      !lenLines.length &&
+      !depLines.length
+    ) {
+      return khaaliResult(settings);
+    }
+
     var network =
       buildFlatNetwork(
         lenLines,
@@ -1956,21 +1912,12 @@
         settings
       );
 
-    /*
-     * STEP 2
-     * Build complete 3D bend network.
-     */
     var network3D =
       build3DNetwork(
         network,
         settings
       );
 
-    /*
-     * STEP 3
-     * Calculate every Length × Depth
-     * interaction together.
-     */
     var intersections =
       buildIntersections(
         network,
@@ -1978,38 +1925,22 @@
         settings
       );
 
-    /*
-     * STEP 4
-     * Extract actual cuts.
-     */
     var cuts =
       buildCutSummary(
         intersections
       );
 
-    /*
-     * STEP 5
-     * Final sheet outline.
-     */
     var sheet =
       buildSheetOutline(
         network.totalLengthIn,
         network.totalDepthIn
       );
 
-    /*
-     * STEP 6
-     * Complete bend sequence.
-     */
     var sequence =
       buildSequence(
         network
       );
 
-    /*
-     * STEP 7
-     * Final result.
-     */
     return {
       version:
         "geometry-v3",
@@ -2031,9 +1962,6 @@
           settings.reliefMm
       },
 
-      /*
-       * COMPLETE USER DATA
-       */
       input: {
         lengthLines:
           network.length,
@@ -2042,15 +1970,9 @@
           network.depth
       },
 
-      /*
-       * FLAT SHEET
-       */
       sheet:
         sheet,
 
-      /*
-       * 3D NETWORK
-       */
       model3D: {
         length:
           network3D.length,
@@ -2059,21 +1981,12 @@
           network3D.depth
       },
 
-      /*
-       * BEND SEQUENCE
-       */
       sequence:
         sequence,
 
-      /*
-       * EVERY CROSSING
-       */
       intersections:
         intersections,
 
-      /*
-       * ONLY REQUIRED CUTS
-       */
       cuts:
         cuts,
 
@@ -2098,7 +2011,7 @@
   }
 
   /* =========================================================
-     GET ONE INTERSECTION / CUT
+     GET ONE INTERSECTION / CUT — safe
      ========================================================= */
 
   function getCut(
@@ -2109,6 +2022,15 @@
     var data =
       analysis ||
       analyze();
+
+    if (
+      !data ||
+      !Array.isArray(
+        data.intersections
+      )
+    ) {
+      return null;
+    }
 
     for (
       var i = 0;
