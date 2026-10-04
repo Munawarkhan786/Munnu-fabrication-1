@@ -1,12 +1,32 @@
 /* =========================================================
-   CORE — State + Settings + Formulas + Storage
+   CORE.JS — State + Settings + Storage + Basic Utilities
+   ---------------------------------------------------------
+   GEOMETRY ENGINE V4 is the MASTER engineering calculator.
+
+   CORE does:
+   1. App state
+   2. Settings
+   3. Fractions
+   4. Storage
+   5. Basic formatting/utilities
+
+   CORE does NOT replace GeometryEngine calculations.
    ========================================================= */
 
-(function() {
+(function () {
   "use strict";
+
+  /* =======================================================
+     STORAGE KEYS
+     ======================================================= */
 
   window.STORAGE_KEY = "sheetMarking_v7";
   window.SETTINGS_KEY = "sheetMarking_settings_v2";
+
+
+  /* =======================================================
+     FRACTIONS
+     ======================================================= */
 
   window.FRACTIONS = [
     { label: "1/16", val: 1 / 16 },
@@ -27,21 +47,85 @@
     { label: '1"', val: 1 }
   ];
 
+
+  /* =======================================================
+     FRACTION LABELS
+     ======================================================= */
+
   window.FRAC_LABELS = [
-    "", "1/16", "1/8", "3/16", "1/4", "5/16", "3/8", "7/16", "1/2",
-    "9/16", "5/8", "11/16", "3/4", "13/16", "7/8", "15/16"
+    "",
+    "1/16",
+    "1/8",
+    "3/16",
+    "1/4",
+    "5/16",
+    "3/8",
+    "7/16",
+    "1/2",
+    "9/16",
+    "5/8",
+    "11/16",
+    "3/4",
+    "13/16",
+    "7/8",
+    "15/16"
   ];
 
-  window.ANGLES = [90, 65, 45, 30];
+
+  /* =======================================================
+     ANGLES
+     -------------------------------------------------------
+     UI can use these as common quick-select angles.
+
+     GeometryEngine itself supports 0–180°.
+     ======================================================= */
+
+  window.ANGLES = [
+    180,
+    135,
+    120,
+    110,
+    100,
+    90,
+    80,
+    75,
+    65,
+    60,
+    55,
+    45,
+    35,
+    30,
+    25,
+    20,
+    15,
+    10,
+    5,
+    0
+  ];
+
+
+  /* =======================================================
+     ZOOM
+     ======================================================= */
 
   window.ZOOM_MAX = 20;
   window.ZOOM_MIN = 0.2;
   window.MIN_SEGMENT_PX = 10;
 
+
+  /* =======================================================
+     MATERIAL K-FACTOR
+     ======================================================= */
+
   window.MATERIAL_K = {
     SS304: 0.44,
     SS202: 0.45
   };
+
+
+  /* =======================================================
+     DEFAULT SETTINGS
+     ======================================================= */
 
   window.DEFAULT_SETTINGS = {
     material: "SS304",
@@ -53,15 +137,31 @@
     relief: 1.6
   };
 
+
+  /* =======================================================
+     APP STATE
+     ======================================================= */
+
   window.state = {
     keyword: "box",
+
     activeSide: "len",
+
     current: 0,
+
     lenLines: [],
+
     depLines: [],
+
     editingLine: null,
+
     editMode: false
   };
+
+
+  /* =======================================================
+     3D VIEW STATE
+     ======================================================= */
 
   window.view3d = {
     rotX: -25,
@@ -71,212 +171,890 @@
     wireframe: false
   };
 
+
+  /* =======================================================
+     FLAT VIEW STATE
+     ======================================================= */
+
   window.flatView = {
     zoom: 1,
     panX: 0,
     panY: 0
   };
 
+
+  /* =======================================================
+     SETTINGS
+     ======================================================= */
+
   window.settings = JSON.parse(
     JSON.stringify(window.DEFAULT_SETTINGS)
   );
 
+
+  /* =======================================================
+     HIDDEN CUTS
+     ======================================================= */
+
   window.hiddenCuts = {};
+
+
+  /* =======================================================
+     AUTO ADD TIMER
+     ======================================================= */
+
   window.autoAddTimer = null;
 
-  window.$ = function(id) {
+
+  /* =======================================================
+     DOM SHORTCUT
+     ======================================================= */
+
+  window.$ = function (id) {
     return document.getElementById(id);
   };
 
-  window.round16 = function(v) {
-    return Math.round(Number(v) * 16) / 16;
-  };
 
-  window.cleanNumber = function(v) {
-    return Math.round(Number(v) * 1000000) / 1000000;
-  };
+  /* =======================================================
+     NUMBER HELPERS
+     ======================================================= */
 
-  window.formatInch = function(value) {
-    value = window.round16(Number(value) || 0);
-    if (value === 0) return "0";
+  window.round16 = function (value) {
+    var n = Number(value);
 
-    var whole = Math.floor(value);
-    var frac = window.round16(value - whole);
-
-    if (frac >= 1) {
-      whole += 1;
-      frac = 0;
+    if (!Number.isFinite(n)) {
+      return 0;
     }
 
-    if (frac === 0) return whole + '"';
-
-    var label = window.FRAC_LABELS[Math.round(frac * 16)];
-    if (!label) return value + '"';
-
-    if (whole === 0) return label + '"';
-    return whole + " " + label + '"';
+    return Math.round(n * 16) / 16;
   };
 
-  window.el = function(tag, cls, text) {
-    var e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (text !== undefined) e.textContent = text;
-    return e;
+
+  window.cleanNumber = function (value) {
+    var n = Number(value);
+
+    if (!Number.isFinite(n)) {
+      return 0;
+    }
+
+    return Math.round(n * 1000000) / 1000000;
   };
 
-  function bendAllowance(theta, R, K, T) {
-    var rad = Math.abs(theta) * Math.PI / 180;
-    return rad * (R + K * T);
+
+  window.clampNumber = function (
+    value,
+    min,
+    max,
+    fallback
+  ) {
+    var n = Number(value);
+
+    if (!Number.isFinite(n)) {
+      n = Number(fallback);
+
+      if (!Number.isFinite(n)) {
+        n = min;
+      }
+    }
+
+    return Math.max(
+      min,
+      Math.min(max, n)
+    );
+  };
+
+
+  /* =======================================================
+     INCH / MM
+     ======================================================= */
+
+  window.inchToMM = function (value) {
+    return Number(value) * 25.4;
+  };
+
+
+  window.mmToInch = function (value) {
+    return Number(value) / 25.4;
+  };
+
+
+  /* =======================================================
+     FORMAT INCH
+     -------------------------------------------------------
+     Example:
+       1.5  -> 1 1/2"
+       0.25 -> 1/4"
+     ======================================================= */
+
+  window.formatInch = function (value) {
+    var n = Number(value);
+
+    if (!Number.isFinite(n)) {
+      return "0";
+    }
+
+    n = window.round16(n);
+
+    if (n === 0) {
+      return "0";
+    }
+
+    var negative = n < 0;
+
+    n = Math.abs(n);
+
+    var whole = Math.floor(n);
+
+    var fraction =
+      Math.round(
+        (n - whole) * 16
+      );
+
+    if (fraction >= 16) {
+      whole += 1;
+      fraction = 0;
+    }
+
+    var label =
+      window.FRAC_LABELS[fraction] || "";
+
+    var result = "";
+
+    if (whole > 0) {
+      result = String(whole);
+
+      if (label) {
+        result += " " + label;
+      }
+    } else {
+      result = label || "0";
+    }
+
+    if (negative) {
+      result = "-" + result;
+    }
+
+    return result + '"';
+  };
+
+
+  /* =======================================================
+     GENERIC ELEMENT HELPER
+     ======================================================= */
+
+  window.el = function (
+    tag,
+    cls,
+    text
+  ) {
+    var element =
+      document.createElement(tag);
+
+    if (cls) {
+      element.className = cls;
+    }
+
+    if (text !== undefined) {
+      element.textContent = text;
+    }
+
+    return element;
+  };
+
+
+  /* =======================================================
+     BASIC FORMULA COMPATIBILITY
+     -------------------------------------------------------
+     These are kept so older modules do not break.
+
+     IMPORTANT:
+     Final engineering calculation should come from
+     GeometryEngine V4.
+     ======================================================= */
+
+  function bendAllowance(
+    theta,
+    R,
+    K,
+    T
+  ) {
+    var angle =
+      Math.abs(Number(theta) || 0);
+
+    var radius =
+      Number(R) || 0;
+
+    var k =
+      Number(K) || 0;
+
+    var thickness =
+      Number(T) || 0;
+
+    var radians =
+      angle * Math.PI / 180;
+
+    return (
+      radians *
+      (radius + k * thickness)
+    );
   }
 
-  function bendDeduction(theta, R, K, T) {
-    var rad = Math.abs(theta) * Math.PI / 180;
-    var BA = bendAllowance(theta, R, K, T);
-    return 2 * (R + T) * Math.tan(rad / 2) - BA;
+
+  function bendDeduction(
+    theta,
+    R,
+    K,
+    T
+  ) {
+    var angle =
+      Math.abs(Number(theta) || 0);
+
+    var radius =
+      Number(R) || 0;
+
+    var thickness =
+      Number(T) || 0;
+
+    var ba =
+      bendAllowance(
+        angle,
+        radius,
+        K,
+        thickness
+      );
+
+    var setback =
+      (radius + thickness) *
+      Math.tan(
+        angle * Math.PI / 360
+      );
+
+    return (
+      2 * setback - ba
+    );
   }
 
-  function cornerRelief(R, T) {
-    var custom = Number(window.settings.relief);
-    if (Number.isFinite(custom) && custom > 0) return custom;
-    return window.cleanNumber(R + T + 0.5);
+
+  function cornerRelief(
+    R,
+    T
+  ) {
+    var custom =
+      Number(
+        window.settings &&
+        window.settings.relief
+      );
+
+    if (
+      Number.isFinite(custom) &&
+      custom > 0
+    ) {
+      return custom;
+    }
+
+    return window.cleanNumber(
+      Number(R || 0) +
+      Number(T || 0) +
+      0.5
+    );
   }
 
-  function calculateCorner(A, B, angle) {
-    var R = Number(window.settings.radius);
-    var K = Number(window.settings.kfactor);
-    var T = Number(window.settings.thickness);
-    var springback = Number(window.settings.springback);
 
-    var effAngle = Number(angle) - springback;
-    if (effAngle <= 0) effAngle = 1;
+  function calculateCorner(
+    A,
+    B,
+    angle
+  ) {
+    var R =
+      Number(
+        window.settings.radius
+      ) || 0.8;
 
-    var BA = bendAllowance(effAngle, R, K, T);
-    var BD = bendDeduction(effAngle, R, K, T);
-    var flat = A + B - BD;
-    var relief = cornerRelief(R, T);
+    var K =
+      Number(
+        window.settings.kfactor
+      ) || 0.44;
+
+    var T =
+      Number(
+        window.settings.thickness
+      ) || 0.8;
+
+    var springback =
+      Number(
+        window.settings.springback
+      ) || 0;
+
+    var intendedAngle =
+      Number(angle);
+
+    if (
+      !Number.isFinite(
+        intendedAngle
+      )
+    ) {
+      intendedAngle = 90;
+    }
+
+    var effectiveAngle =
+      Math.max(
+        0,
+        Math.min(
+          180,
+          intendedAngle -
+          springback
+        )
+      );
+
+    var BA =
+      bendAllowance(
+        effectiveAngle,
+        R,
+        K,
+        T
+      );
+
+    var BD =
+      bendDeduction(
+        effectiveAngle,
+        R,
+        K,
+        T
+      );
 
     return {
-      angle: Number(angle),
-      effectiveAngle: effAngle,
-      BA: window.cleanNumber(BA),
-      BD: window.cleanNumber(BD),
-      flat: window.cleanNumber(flat),
-      relief: relief
+      angle: intendedAngle,
+
+      effectiveAngle:
+        effectiveAngle,
+
+      BA:
+        window.cleanNumber(BA),
+
+      BD:
+        window.cleanNumber(BD),
+
+      flat:
+        window.cleanNumber(
+          Number(A || 0) +
+          Number(B || 0) -
+          BD
+        ),
+
+      relief:
+        cornerRelief(R, T)
     };
   }
 
+
+  /* =======================================================
+     FORMULAS API
+     -------------------------------------------------------
+     Compatibility only.
+     GeometryEngine is master.
+     ======================================================= */
+
   window.Formulas = {
-    bendAllowance: bendAllowance,
-    bendDeduction: bendDeduction,
-    cornerRelief: cornerRelief,
-    calculateCorner: calculateCorner
+    bendAllowance:
+      bendAllowance,
+
+    bendDeduction:
+      bendDeduction,
+
+    cornerRelief:
+      cornerRelief,
+
+    calculateCorner:
+      calculateCorner
   };
+
+
+  /* =======================================================
+     NORMALIZE LINE
+     -------------------------------------------------------
+     Makes old/new saved lines compatible.
+     ======================================================= */
+
+  function normalizeLine(
+    line,
+    index,
+    side
+  ) {
+    line = line || {};
+
+    var size =
+      Number(
+        line.size !== undefined
+          ? line.size
+          : line.value
+      );
+
+    if (!Number.isFinite(size)) {
+      size = 0;
+    }
+
+    var angle =
+      Number(
+        line.angle !== undefined
+          ? line.angle
+          : line.degree
+      );
+
+    if (!Number.isFinite(angle)) {
+      angle = 90;
+    }
+
+    /*
+      GeometryEngine supports 0–180.
+    */
+    angle =
+      Math.max(
+        0,
+        Math.min(
+          180,
+          angle
+        )
+      );
+
+    var bend =
+      String(
+        line.bend !== undefined
+          ? line.bend
+          : line.direction
+      ).toLowerCase();
+
+    bend =
+      bend === "down"
+        ? "down"
+        : "up";
+
+    return {
+      id:
+        line.id ||
+        (
+          side === "dep"
+            ? "D"
+            : "L"
+        ) + (index + 1),
+
+      size:
+        window.round16(size),
+
+      bend:
+        bend,
+
+      angle:
+        angle
+    };
+  }
+
+
+  /* =======================================================
+     SAVE
+     ======================================================= */
 
   function save() {
     try {
-      var s = window.$("saveStatus");
-      if (s) {
-        s.className = "save-status saving";
-        s.textContent = "💾 Saving...";
+      var status =
+        window.$("saveStatus");
+
+      if (status) {
+        status.className =
+          "save-status saving";
+
+        status.textContent =
+          "💾 Saving...";
       }
 
       localStorage.setItem(
         window.STORAGE_KEY,
-        JSON.stringify(window.state)
+        JSON.stringify(
+          window.state
+        )
       );
 
-      if (s) {
-        s.className = "save-status saved";
-        s.textContent = "🟢 Saved";
+      if (status) {
+        status.className =
+          "save-status saved";
+
+        status.textContent =
+          "🟢 Saved";
       }
-    } catch (e) {
-      var s2 = window.$("saveStatus");
-      if (s2) {
-        s2.className = "save-status failed";
-        s2.textContent = "🔴 Save Failed";
+
+    } catch (error) {
+
+      var statusError =
+        window.$("saveStatus");
+
+      if (statusError) {
+        statusError.className =
+          "save-status failed";
+
+        statusError.textContent =
+          "🔴 Save Failed";
       }
-      if (window.Bugs) {
-        window.Bugs.log("storage.save", e.message, e.stack);
+
+      if (
+        window.Bugs &&
+        typeof window.Bugs.log === "function"
+      ) {
+        window.Bugs.log(
+          "storage.save",
+          error.message,
+          error.stack
+        );
       }
     }
   }
+
+
+  /* =======================================================
+     SAVE SETTINGS
+     ======================================================= */
 
   function saveSettings() {
     try {
+
       localStorage.setItem(
         window.SETTINGS_KEY,
-        JSON.stringify(window.settings)
+        JSON.stringify(
+          window.settings
+        )
       );
-    } catch (e) {
-      if (window.Bugs) {
-        window.Bugs.log("storage.saveSettings", e.message, e.stack);
+
+    } catch (error) {
+
+      if (
+        window.Bugs &&
+        typeof window.Bugs.log === "function"
+      ) {
+        window.Bugs.log(
+          "storage.saveSettings",
+          error.message,
+          error.stack
+        );
       }
     }
   }
+
+
+  /* =======================================================
+     LOAD SETTINGS
+     ======================================================= */
 
   function loadSettings() {
     try {
-      var raw = localStorage.getItem(window.SETTINGS_KEY);
-      if (!raw) return;
 
-      var data = JSON.parse(raw);
-      if (!data || typeof data !== "object") return;
+      var raw =
+        localStorage.getItem(
+          window.SETTINGS_KEY
+        );
 
-      Object.keys(window.DEFAULT_SETTINGS).forEach(function(k) {
-        if (data[k] !== undefined) {
-          window.settings[k] = data[k];
-        }
-      });
-    } catch (e) {
-      if (window.Bugs) {
-        window.Bugs.log("storage.loadSettings", e.message, e.stack);
+      if (!raw) {
+        return;
       }
-    }
-  }
 
-  function load() {
-    try {
-      var raw = localStorage.getItem(window.STORAGE_KEY);
-      if (!raw) return;
+      var data =
+        JSON.parse(raw);
 
-      var data = JSON.parse(raw);
-      if (!data || typeof data !== "object") return;
+      if (
+        !data ||
+        typeof data !== "object"
+      ) {
+        return;
+      }
 
-      window.state.keyword = data.keyword || "box";
-      window.state.activeSide =
-        data.activeSide === "dep" ? "dep" : "len";
-      window.state.lenLines =
-        Array.isArray(data.lenLines) ? data.lenLines : [];
-      window.state.depLines =
-        Array.isArray(data.depLines) ? data.depLines : [];
+      Object.keys(
+        window.DEFAULT_SETTINGS
+      ).forEach(
+        function (key) {
 
-      [window.state.lenLines, window.state.depLines].forEach(
-        function(lines) {
-          lines.forEach(function(l) {
-            l.size = window.round16(Number(l.size) || 0);
-            l.bend = l.bend === "down" ? "down" : "up";
-            l.angle = window.ANGLES.indexOf(Number(l.angle)) >= 0
-              ? Number(l.angle)
-              : 90;
-          });
+          if (
+            data[key] !== undefined
+          ) {
+            window.settings[key] =
+              data[key];
+          }
+
         }
       );
 
-      if (window.$("keyword")) {
-        window.$("keyword").value = window.state.keyword;
+      /*
+        Safety normalization
+      */
+
+      if (
+        window.settings.material !==
+        "SS304" &&
+        window.settings.material !==
+        "SS202"
+      ) {
+        window.settings.material =
+          "SS304";
       }
-    } catch (e) {
-      if (window.Bugs) {
-        window.Bugs.log("storage.load", e.message, e.stack);
+
+      window.settings.thickness =
+        window.clampNumber(
+          window.settings.thickness,
+          0.1,
+          10,
+          0.8
+        );
+
+      window.settings.vdie =
+        window.clampNumber(
+          window.settings.vdie,
+          0.1,
+          100,
+          6
+        );
+
+      window.settings.radius =
+        window.clampNumber(
+          window.settings.radius,
+          0.1,
+          50,
+          0.8
+        );
+
+      window.settings.kfactor =
+        window.clampNumber(
+          window.settings.kfactor,
+          0,
+          1,
+          0.44
+        );
+
+      window.settings.springback =
+        window.clampNumber(
+          window.settings.springback,
+          0,
+          30,
+          0.5
+        );
+
+      window.settings.relief =
+        window.clampNumber(
+          window.settings.relief,
+          0,
+          50,
+          1.6
+        );
+
+    } catch (error) {
+
+      if (
+        window.Bugs &&
+        typeof window.Bugs.log === "function"
+      ) {
+        window.Bugs.log(
+          "storage.loadSettings",
+          error.message,
+          error.stack
+        );
       }
     }
   }
 
+
+  /* =======================================================
+     LOAD STATE
+     ======================================================= */
+
+  function load() {
+    try {
+
+      var raw =
+        localStorage.getItem(
+          window.STORAGE_KEY
+        );
+
+      if (!raw) {
+        return;
+      }
+
+      var data =
+        JSON.parse(raw);
+
+      if (
+        !data ||
+        typeof data !== "object"
+      ) {
+        return;
+      }
+
+      window.state.keyword =
+        data.keyword ||
+        "box";
+
+      window.state.activeSide =
+        data.activeSide === "dep"
+          ? "dep"
+          : "len";
+
+      window.state.lenLines =
+        Array.isArray(
+          data.lenLines
+        )
+          ? data.lenLines
+          : [];
+
+      window.state.depLines =
+        Array.isArray(
+          data.depLines
+        )
+          ? data.depLines
+          : [];
+
+      /*
+        Normalize Length lines
+      */
+
+      window.state.lenLines =
+        window.state.lenLines.map(
+          function (line, index) {
+            return normalizeLine(
+              line,
+              index,
+              "len"
+            );
+          }
+        );
+
+      /*
+        Normalize Depth lines
+      */
+
+      window.state.depLines =
+        window.state.depLines.map(
+          function (line, index) {
+            return normalizeLine(
+              line,
+              index,
+              "dep"
+            );
+          }
+        );
+
+      /*
+        Update keyword input
+      */
+
+      var keywordInput =
+        window.$("keyword");
+
+      if (keywordInput) {
+        keywordInput.value =
+          window.state.keyword;
+      }
+
+    } catch (error) {
+
+      if (
+        window.Bugs &&
+        typeof window.Bugs.log === "function"
+      ) {
+        window.Bugs.log(
+          "storage.load",
+          error.message,
+          error.stack
+        );
+      }
+    }
+  }
+
+
+  /* =======================================================
+     CLEAR STATE
+     ======================================================= */
+
+  function clearState() {
+
+    window.state.keyword =
+      "box";
+
+    window.state.activeSide =
+      "len";
+
+    window.state.current =
+      0;
+
+    window.state.lenLines =
+      [];
+
+    window.state.depLines =
+      [];
+
+    window.state.editingLine =
+      null;
+
+    window.state.editMode =
+      false;
+
+    window.hiddenCuts = {};
+
+    save();
+  }
+
+
+  /* =======================================================
+     STORAGE API
+     ======================================================= */
+
   window.Storage = {
-    save: save,
-    saveSettings: saveSettings,
-    loadSettings: loadSettings,
-    load: load
+
+    save:
+      save,
+
+    saveSettings:
+      saveSettings,
+
+    loadSettings:
+      loadSettings,
+
+    load:
+      load,
+
+    clear:
+      clearState
   };
+
+
+  /* =======================================================
+     CORE API
+     ======================================================= */
+
+  window.Core = {
+
+    normalizeLine:
+      normalizeLine,
+
+    formatInch:
+      window.formatInch,
+
+    round16:
+      window.round16,
+
+    cleanNumber:
+      window.cleanNumber,
+
+    inchToMM:
+      window.inchToMM,
+
+    mmToInch:
+      window.mmToInch,
+
+    clampNumber:
+      window.clampNumber
+  };
+
+
+  /* =======================================================
+     STARTUP LOG
+     ======================================================= */
+
+  console.log(
+    "✅ Core V4 compatible loaded"
+  );
 
 })();
