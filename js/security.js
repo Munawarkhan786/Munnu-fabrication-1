@@ -1,221 +1,364 @@
 /* =========================================================
-   SECURITY — Password + DevTools block + Copy protection
+   SECURITY.JS — Login / Access System
+
+   HTML IDs:
+   login-screen
+   password-input
+   login-btn
+   login-error
+   app-content
+
+   Kaam:
+   1. Password check
+   2. Login screen show/hide
+   3. Login session maintain
+   4. Logout support
+   5. Wrong password error
+   6. Bugs system ke saath compatible
    ========================================================= */
 
-(function() {
+(function () {
   "use strict";
 
-  var APP_PASSWORD = "mk786sheet";
+  // =========================================================
+  // SECURITY SETTINGS
+  // =========================================================
 
-  /* ---------- PASSWORD CHECK ---------- */
+  var LOGIN_KEY = "sheetMarking_loggedIn_v1";
 
-  function checkPassword() {
-    var input = document.getElementById("password-input");
-    if (!input) return false;
+  /*
+    IMPORTANT:
+    Yeh client-side login hai.
+    Browser app ko completely secure nahi banata.
+    Sirf normal app access ke liye hai.
+  */
 
-    if (input.value === APP_PASSWORD) {
-      try {
-        sessionStorage.setItem("_ok", "1");
-      } catch (e) {}
-      hideLoginScreen();
-      return true;
+  var APP_PASSWORD = "1234";
+
+  // =========================================================
+  // ELEMENT SHORTCUT
+  // =========================================================
+
+  function getEl(id) {
+    return document.getElementById(id);
+  }
+
+  // =========================================================
+  // SHOW LOGIN
+  // =========================================================
+
+  function showLogin() {
+
+    var loginScreen = getEl("login-screen");
+    var appContent = getEl("app-content");
+
+    if (loginScreen) {
+      loginScreen.style.display = "flex";
+    }
+
+    if (appContent) {
+      appContent.style.display = "none";
+    }
+
+    clearError();
+
+    var passwordInput = getEl("password-input");
+
+    if (passwordInput) {
+      setTimeout(function () {
+        passwordInput.focus();
+      }, 100);
+    }
+  }
+
+  // =========================================================
+  // SHOW APP
+  // =========================================================
+
+  function showApp() {
+
+    var loginScreen = getEl("login-screen");
+    var appContent = getEl("app-content");
+
+    if (loginScreen) {
+      loginScreen.style.display = "none";
+    }
+
+    if (appContent) {
+      appContent.style.display = "block";
+    }
+
+    clearError();
+  }
+
+  // =========================================================
+  // ERROR MESSAGE
+  // =========================================================
+
+  function showError(message) {
+
+    var errorEl = getEl("login-error");
+
+    if (!errorEl) {
+      return;
+    }
+
+    errorEl.textContent = message || "Password galat hai.";
+
+    errorEl.style.display = "block";
+  }
+
+  // =========================================================
+  // CLEAR ERROR
+  // =========================================================
+
+  function clearError() {
+
+    var errorEl = getEl("login-error");
+
+    if (!errorEl) {
+      return;
+    }
+
+    errorEl.textContent = "";
+    errorEl.style.display = "none";
+  }
+
+  // =========================================================
+  // GET PASSWORD
+  // =========================================================
+
+  function getPassword() {
+
+    var input = getEl("password-input");
+
+    if (!input) {
+      return "";
+    }
+
+    return String(input.value || "").trim();
+  }
+
+  // =========================================================
+  // CHECK PASSWORD
+  // =========================================================
+
+  function checkPassword(password) {
+
+    return password === APP_PASSWORD;
+  }
+
+  // =========================================================
+  // SAVE LOGIN SESSION
+  // =========================================================
+
+  function saveSession() {
+
+    try {
+
+      localStorage.setItem(
+        LOGIN_KEY,
+        "true"
+      );
+
+    } catch (error) {
+
+      if (window.Bugs) {
+        window.Bugs.capture(
+          error,
+          "SECURITY",
+          "Login session save failed"
+        );
+      }
+
+    }
+  }
+
+  // =========================================================
+  // CHECK LOGIN SESSION
+  // =========================================================
+
+  function hasSession() {
+
+    try {
+
+      return localStorage.getItem(LOGIN_KEY) === "true";
+
+    } catch (error) {
+
+      if (window.Bugs) {
+        window.Bugs.capture(
+          error,
+          "SECURITY",
+          "Login session read failed"
+        );
+      }
+
+      return false;
+    }
+  }
+
+  // =========================================================
+  // LOGIN
+  // =========================================================
+
+  function login() {
+
+    clearError();
+
+    var password = getPassword();
+
+    if (!password) {
+
+      showError("Password daalo.");
+
+      return false;
+    }
+
+    if (!checkPassword(password)) {
+
+      showError("❌ Password galat hai.");
+
+      var input = getEl("password-input");
+
+      if (input) {
+        input.value = "";
+        input.focus();
+      }
+
+      if (window.Bugs) {
+        window.Bugs.log(
+          "Wrong password attempt",
+          "SECURITY"
+        );
+      }
+
+      return false;
+    }
+
+    saveSession();
+
+    showApp();
+
+    // Password field clear
+    var passwordInput = getEl("password-input");
+
+    if (passwordInput) {
+      passwordInput.value = "";
+    }
+
+    return true;
+  }
+
+  // =========================================================
+  // LOGOUT
+  // =========================================================
+
+  function logout() {
+
+    try {
+
+      localStorage.removeItem(LOGIN_KEY);
+
+    } catch (error) {
+
+      if (window.Bugs) {
+        window.Bugs.capture(
+          error,
+          "SECURITY",
+          "Logout session clear failed"
+        );
+      }
+
+    }
+
+    showLogin();
+  }
+
+  // =========================================================
+  // LOGIN BUTTON
+  // =========================================================
+
+  function bindLoginButton() {
+
+    var button = getEl("login-btn");
+
+    if (!button) {
+      return;
+    }
+
+    button.addEventListener("click", function () {
+      login();
+    });
+  }
+
+  // =========================================================
+  // ENTER KEY SUPPORT
+  // =========================================================
+
+  function bindPasswordEnter() {
+
+    var input = getEl("password-input");
+
+    if (!input) {
+      return;
+    }
+
+    input.addEventListener("keydown", function (event) {
+
+      if (event.key === "Enter") {
+
+        event.preventDefault();
+
+        login();
+      }
+
+    });
+  }
+
+  // =========================================================
+  // INITIAL LOGIN STATE
+  // =========================================================
+
+  function checkSession() {
+
+    if (hasSession()) {
+      showApp();
     } else {
-      var err = document.getElementById("login-error");
-      if (err) err.textContent = "❌ Galat password";
-      input.value = "";
-      return false;
+      showLogin();
     }
   }
 
-  function showLoginScreen() {
-    var ls = document.getElementById("login-screen");
-    var ac = document.getElementById("app-content");
-    if (ls) ls.style.display = "flex";
-    if (ac) ac.style.display = "none";
-  }
-
-  function hideLoginScreen() {
-    var ls = document.getElementById("login-screen");
-    var ac = document.getElementById("app-content");
-    if (ls) ls.style.display = "none";
-    if (ac) ac.style.display = "block";
-  }
-
-  /* ---------- KEYBOARD BLOCK ---------- */
-
-  function blockKeyboard() {
-    document.addEventListener("keydown", function(e) {
-
-      var key = e.key || "";
-      var code = e.keyCode || 0;
-
-      /* F12 */
-      if (key === "F12" || code === 123) {
-        e.preventDefault();
-        e.stopPropagation();
-        return false;
-      }
-
-      /* Ctrl+Shift+I / J / C */
-      if (e.ctrlKey && e.shiftKey &&
-          ["I","i","J","j","C","c"].indexOf(key) !== -1) {
-        e.preventDefault();
-        e.stopPropagation();
-        return false;
-      }
-
-      /* Ctrl+U (View Source) */
-      if (e.ctrlKey && (key === "U" || key === "u")) {
-        e.preventDefault();
-        e.stopPropagation();
-        return false;
-      }
-
-      /* Ctrl+S (Save) */
-      if (e.ctrlKey && (key === "S" || key === "s")) {
-        e.preventDefault();
-        e.stopPropagation();
-        return false;
-      }
-
-      /* Ctrl+P (Print) */
-      if (e.ctrlKey && (key === "P" || key === "p")) {
-        e.preventDefault();
-        e.stopPropagation();
-        return false;
-      }
-
-    }, true);
-  }
-
-  /* ---------- RIGHT CLICK BLOCK ---------- */
-
-  function blockRightClick() {
-    document.addEventListener("contextmenu", function(e) {
-      e.preventDefault();
-      return false;
-    });
-  }
-
-  /* ---------- TEXT SELECTION BLOCK ---------- */
-
-  function blockSelection() {
-    document.addEventListener("selectstart", function(e) {
-      var target = e.target;
-      if (!target) return;
-
-      var tag = target.tagName;
-
-      /* Input/textarea mein selection allow */
-      if (tag === "INPUT" ||
-          tag === "TEXTAREA" ||
-          tag === "SELECT") {
-        return true;
-      }
-
-      e.preventDefault();
-      return false;
-    });
-  }
-
-  /* ---------- CONSOLE BLOCK ---------- */
-
-  function blockConsole() {
-    try {
-      var noop = function() {};
-      console.log = noop;
-      console.info = noop;
-      console.warn = noop;
-      console.debug = noop;
-      console.table = noop;
-      /* console.error NOT blocked — bugs system needs it */
-    } catch (e) {}
-  }
-
-  /* ---------- DEVTOOLS DETECT ---------- */
-
-  function detectDevTools() {
-    var threshold = 160;
-    var wDiff = window.outerWidth - window.innerWidth;
-    var hDiff = window.outerHeight - window.innerHeight;
-
-    if (wDiff > threshold || hDiff > threshold) {
-      blockUser();
-    }
-  }
-
-  function blockUser() {
-    try {
-      sessionStorage.removeItem("_ok");
-    } catch (e) {}
-
-    document.body.innerHTML =
-      '<div style="background:#0f1419;color:#fbbf24;' +
-      'font-family:sans-serif;display:flex;align-items:center;' +
-      'justify-content:center;height:100vh;text-align:center;' +
-      'padding:20px;">' +
-        '<div>' +
-          '<h1 style="font-size:24px;margin-bottom:10px;">' +
-            '🚫 Access Denied' +
-          '</h1>' +
-          '<p style="font-size:14px;color:#888;">' +
-            'DevTools detected. Reloading...' +
-          '</p>' +
-        '</div>' +
-      '</div>';
-
-    setTimeout(function() {
-      window.location.reload();
-    }, 2000);
-  }
-
-  /* ---------- INIT ---------- */
+  // =========================================================
+  // INIT
+  // =========================================================
 
   function init() {
 
-    /* Session check */
-    var ok = null;
-    try {
-      ok = sessionStorage.getItem("_ok");
-    } catch (e) {}
+    bindLoginButton();
 
-    if (ok === "1") {
-      hideLoginScreen();
-    } else {
-      showLoginScreen();
-    }
+    bindPasswordEnter();
 
-    /* Login button */
-    var loginBtn = document.getElementById("login-btn");
-    if (loginBtn) {
-      loginBtn.onclick = checkPassword;
-    }
-
-    /* Enter key */
-    var passInput = document.getElementById("password-input");
-    if (passInput) {
-      passInput.addEventListener("keypress", function(e) {
-        if (e.key === "Enter") checkPassword();
-      });
-    }
-
-    /* Protection */
-    blockKeyboard();
-    blockRightClick();
-    blockSelection();
-    blockConsole();
-
-    /* DevTools detect — har 1 second */
-    setInterval(detectDevTools, 1000);
+    checkSession();
   }
 
-  /* ---------- EXPOSE ---------- */
+  // =========================================================
+  // PUBLIC API
+  // =========================================================
 
   window.Security = {
+
     init: init,
-    check: checkPassword,
-    show: showLoginScreen,
-    hide: hideLoginScreen
+
+    login: login,
+
+    logout: logout,
+
+    isLoggedIn: hasSession,
+
+    showLogin: showLogin,
+
+    showApp: showApp
   };
 
 })();
