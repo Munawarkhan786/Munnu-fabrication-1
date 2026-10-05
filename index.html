@@ -63,10 +63,6 @@
     id="app-content"
     style="display:none;">
 
-    <!-- ===================================================
-         HEADER
-         =================================================== -->
-
     <header class="app-header">
 
       <h1>
@@ -99,10 +95,6 @@
 
     </header>
 
-
-    <!-- ===================================================
-         TABS
-         =================================================== -->
 
     <nav class="tabs">
 
@@ -137,23 +129,12 @@
     </nav>
 
 
-    <!-- ===================================================
-         MAIN
-         =================================================== -->
-
     <main>
 
-
-      <!-- =================================================
-           INPUT TAB
-           ================================================= -->
-
+      <!-- INPUT TAB -->
       <section
         id="tab-input"
         class="tab-content">
-
-
-        <!-- PROJECT NAME -->
 
         <div class="card">
 
@@ -174,18 +155,11 @@
         </div>
 
 
-        <!-- =================================================
-             SIZE ENTRY
-             ================================================= -->
-
         <div class="card">
 
           <h2>
             📐 Size Entry
           </h2>
-
-
-          <!-- ACTIVE SIDE -->
 
           <div class="side-label">
             Active Side
@@ -214,8 +188,6 @@
           </div>
 
 
-          <!-- CURRENT SIZE -->
-
           <div
             class="side-label"
             style="margin-top:12px;">
@@ -235,8 +207,6 @@
           </div>
 
 
-          <!-- TOTAL -->
-
           <div class="total-display">
 
             <span class="total-label">
@@ -253,10 +223,6 @@
 
           </div>
 
-
-          <!-- =================================================
-               BEND ANGLE
-               ================================================= -->
 
           <div
             class="side-label"
@@ -298,10 +264,6 @@
           </div>
 
 
-          <!-- =================================================
-               BEND DIRECTION
-               ================================================= -->
-
           <div
             class="side-label"
             style="margin-top:14px;">
@@ -333,10 +295,6 @@
           </div>
 
 
-          <!-- =================================================
-               CALCULATOR / KEYPAD
-               ================================================= -->
-
           <div
             class="calc-grid"
             id="calc-grid">
@@ -347,8 +305,6 @@
             id="frac-grid">
           </div>
 
-
-          <!-- ACTION BUTTONS -->
 
           <div class="action-row">
 
@@ -400,10 +356,6 @@
         </div>
 
 
-        <!-- =================================================
-             EDIT BAR
-             ================================================= -->
-
         <div
           id="edit-bar"
           class="edit-bar hidden">
@@ -441,18 +393,11 @@
         </div>
 
 
-        <!-- =================================================
-             MARKING LINES
-             ================================================= -->
-
         <div class="card">
 
           <h2>
             📋 Marking Lines (Live)
           </h2>
-
-
-          <!-- LENGTH -->
 
           <div class="lines-section">
 
@@ -476,8 +421,6 @@
 
           </div>
 
-
-          <!-- DEPTH -->
 
           <div class="lines-section">
 
@@ -506,16 +449,10 @@
       </section>
 
 
-      <!-- =================================================
-           VIEW TAB
-           ================================================= -->
-
+      <!-- VIEW TAB -->
       <section
         id="tab-view"
         class="tab-content hidden">
-
-
-        <!-- VIEW TOGGLE -->
 
         <div class="card">
 
@@ -549,10 +486,6 @@
 
         </div>
 
-
-        <!-- =================================================
-             FLAT VIEW
-             ================================================= -->
 
         <div
           class="card"
@@ -647,10 +580,6 @@
         </div>
 
 
-        <!-- =================================================
-             3D VIEW
-             ================================================= -->
-
         <div
           class="card hidden"
           id="three-container">
@@ -740,14 +669,10 @@
       </section>
 
 
-      <!-- =================================================
-           RESULT TAB
-           ================================================= -->
-
+      <!-- RESULT TAB -->
       <section
         id="tab-result"
         class="tab-content hidden">
-
 
         <div class="card">
 
@@ -794,8 +719,6 @@
 
         </div>
 
-
-        <!-- SUMMARY -->
 
         <div class="card">
 
@@ -983,16 +906,10 @@
       </section>
 
 
-      <!-- =================================================
-           SETTINGS TAB
-           ================================================= -->
-
+      <!-- SETTINGS TAB -->
       <section
         id="tab-settings"
         class="tab-content hidden">
-
-
-        <!-- MATERIAL -->
 
         <div class="card">
 
@@ -1035,8 +952,6 @@
 
         </div>
 
-
-        <!-- THICKNESS -->
 
         <div class="card">
 
@@ -1110,8 +1025,6 @@
 
         </div>
 
-
-        <!-- ADVANCED -->
 
         <div class="card">
 
@@ -1240,8 +1153,6 @@
         </div>
 
 
-        <!-- QUICK GUIDE -->
-
         <div class="card">
 
           <h2>
@@ -1289,10 +1200,6 @@
     </main>
 
 
-    <!-- ===================================================
-         FOOTER
-         =================================================== -->
-
     <footer class="footer-bar">
 
       <button
@@ -1318,10 +1225,7 @@
   </div>
 
 
-  <!-- =====================================================
-       BUGS PANEL
-       ===================================================== -->
-
+  <!-- BUGS PANEL -->
   <div
     id="bugs-panel"
     class="bugs-panel hidden">
@@ -1373,18 +1277,11 @@
   </div>
 
 
-  <!-- =====================================================
-       THREE.JS
-       ===================================================== -->
-
+  <!-- THREE.JS -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
 
-  <!-- =====================================================
-       APP JS
-       ORDER IMPORTANT
-       ===================================================== -->
-
+  <!-- APP JS -->
   <script src="js/bugs.js"></script>
 
   <script src="js/security.js"></script>
@@ -1406,6 +1303,45 @@
   <script src="js/ui.js"></script>
 
   <script src="js/main.js"></script>
+
+
+  <!-- =====================================================
+       DEBUG TOOL — Temporary
+       Yeh data popup mein dikhayega
+       3 second baad site khulne ke
+       ===================================================== -->
+  <script>
+  setTimeout(function() {
+    var s = window.AppState || window.state || {};
+    var r = window.GeometryEngine ? window.GeometryEngine.analyze(s) : null;
+
+    var out = {
+      "=== STATE ===": "==========",
+      "lenLines_count": s.lenLines ? s.lenLines.length : -1,
+      "depLines_count": s.depLines ? s.depLines.length : -1,
+      "settings_material": s.settings ? s.settings.material : "N/A",
+      "settings_thickness": s.settings ? s.settings.thickness : "N/A",
+
+      "=== SHEET ===": "==========",
+      "sheet_width": r && r.sheet ? r.sheet.widthInch : "NO SHEET",
+      "sheet_height": r && r.sheet ? r.sheet.heightInch : "NO SHEET",
+
+      "=== FLAT ===": "==========",
+      "flat_lengthLines": r && r.flat && r.flat.lengthLines ? r.flat.lengthLines.length : 0,
+      "flat_depthLines": r && r.flat && r.flat.depthLines ? r.flat.depthLines.length : 0,
+      "flat_first_len": r && r.flat && r.flat.lengthLines ? r.flat.lengthLines[0] : null,
+
+      "=== CUTS ===": "==========",
+      "cuts_total": r && r.cuts ? r.cuts.length : 0,
+      "cuts_required": r && r.cuts ? r.cuts.filter(function(c){return c.required;}).length : 0,
+
+      "=== 3D ===": "==========",
+      "records_count": r && r.threeD && r.threeD.records ? r.threeD.records.length : 0
+    };
+
+    alert(JSON.stringify(out, null, 2));
+  }, 3000);
+  </script>
 
 
 </body>
