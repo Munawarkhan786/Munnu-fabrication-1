@@ -1,10 +1,11 @@
 /* =========================================================
-   3D VIEW — MASTER GEOMETRY V4
+   3D VIEW — MASTER GEOMETRY V5 (FULL FINAL)
    Sheet Metal Complete 3D + Reverse/Flat View
 
    FIX V5:
    - GeometryEngine.analyze() ko state pass kiya
    - Ab Settings + Lines dono calculation mein use honge
+   - Poora code — kuch missing nahi
    ========================================================= */
 
 (function () {
@@ -57,6 +58,10 @@
       }
     }
   }
+
+  /* =========================================================
+     SETUP
+     ========================================================= */
 
   function setup3D() {
     if (ready) return;
@@ -113,6 +118,10 @@
     updateCamera();
     animate();
   }
+
+  /* =========================================================
+     EVENTS
+     ========================================================= */
 
   function bindEvents() {
     if (!canvasEl) return;
@@ -225,7 +234,7 @@
   }
 
   /* =========================================================
-     MASTER DATA — YAHAN FIX KIYA
+     MASTER DATA — FIX
      ========================================================= */
 
   function getMasterData() {
@@ -235,7 +244,6 @@
     }
 
     try {
-      // ✅ FIX: state pass karo
       var state = window.AppState || window.state || {};
       return window.GeometryEngine.analyze(state);
     } catch (err) {
@@ -243,6 +251,10 @@
       return null;
     }
   }
+
+  /* =========================================================
+     DRAW
+     ========================================================= */
 
   function draw() {
     if (!ready) setup3D();
@@ -262,6 +274,10 @@
     updateCamera();
   }
 
+  /* =========================================================
+     COMPLETE BENT SHEET
+     ========================================================= */
+
   function buildCompleteView(data) {
     var lines = [];
 
@@ -273,10 +289,7 @@
       lines = lines.concat(data.depthLines);
     }
 
-    if (
-      lines.length === 0 &&
-      data.threeD
-    ) {
+    if (lines.length === 0 && data.threeD) {
       if (Array.isArray(data.threeD.length)) {
         lines = lines.concat(data.threeD.length);
       }
@@ -348,6 +361,10 @@
     buildReferenceGrid(points);
   }
 
+  /* =========================================================
+     BENT SHEET
+     ========================================================= */
+
   function buildBentSheet(points, data) {
     if (points.length < 2) return;
 
@@ -388,6 +405,10 @@
     }
   }
 
+  /* =========================================================
+     BEND MARKERS
+     ========================================================= */
+
   function buildBendMarkers(points, lines) {
     if (points.length < 3) return;
 
@@ -421,7 +442,7 @@
   function addAngleMarker(position, angle) {
     var length = 12;
 
-    var points = [
+    var pts = [
       new THREE.Vector3(
         position.x - length,
         position.y,
@@ -434,7 +455,7 @@
       )
     ];
 
-    var geometry = new THREE.BufferGeometry().setFromPoints(points);
+    var geometry = new THREE.BufferGeometry().setFromPoints(pts);
 
     var material = new THREE.LineBasicMaterial({
       color: 0xffb020
@@ -443,6 +464,10 @@
     var line = new THREE.Line(geometry, material);
     meshGroup.add(line);
   }
+
+  /* =========================================================
+     3D CUTS
+     ========================================================= */
 
   function build3DCuts(data) {
     var cuts = Array.isArray(data.cuts) ? data.cuts : [];
@@ -483,6 +508,10 @@
       meshGroup.add(mesh);
     }
   }
+
+  /* =========================================================
+     REVERSE / FLAT VIEW
+     ========================================================= */
 
   function buildReverseView(data) {
     var sheet = data.sheet;
@@ -553,6 +582,10 @@
     addRectangleOutline(width, height);
   }
 
+  /* =========================================================
+     FLAT LINE
+     ========================================================= */
+
   function addFlatLine(x1, y1, x2, y2, color) {
     var geometry = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(x1, y1, 3),
@@ -563,6 +596,10 @@
     var line = new THREE.Line(geometry, material);
     meshGroup.add(line);
   }
+
+  /* =========================================================
+     FLAT CUTS
+     ========================================================= */
 
   function buildFlatCuts(data) {
     var cuts = Array.isArray(data.cuts) ? data.cuts : [];
@@ -583,4 +620,229 @@
       );
 
       var material = new THREE.MeshBasicMaterial({
-        color: 0
+        color: 0xff0000
+      });
+
+      var mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(x, y, 5);
+      meshGroup.add(mesh);
+    });
+  }
+
+  /* =========================================================
+     SHEET OUTLINE
+     ========================================================= */
+
+  function addRectangleOutline(width, height) {
+    var pts = [
+      new THREE.Vector3(0, 0, 6),
+      new THREE.Vector3(width, 0, 6),
+      new THREE.Vector3(width, height, 6),
+      new THREE.Vector3(0, height, 6),
+      new THREE.Vector3(0, 0, 6)
+    ];
+
+    var geometry = new THREE.BufferGeometry().setFromPoints(pts);
+
+    var material = new THREE.LineBasicMaterial({
+      color: 0xffffff
+    });
+
+    var line = new THREE.Line(geometry, material);
+    meshGroup.add(line);
+  }
+
+  /* =========================================================
+     REFERENCE GRID
+     ========================================================= */
+
+  function buildReferenceGrid(points) {
+    if (!points || points.length < 2) return;
+
+    var size = 500;
+
+    var grid = new THREE.GridHelper(
+      size,
+      20,
+      0x333333,
+      0x1c1c1c
+    );
+
+    grid.rotation.x = Math.PI / 2;
+    grid.position.z = -5;
+
+    meshGroup.add(grid);
+  }
+
+  /* =========================================================
+     CENTER MODEL
+     ========================================================= */
+
+  function centerPoints(points) {
+    if (!points || points.length === 0) return;
+
+    var box = new THREE.Box3();
+
+    points.forEach(function (p) {
+      box.expandByPoint(p);
+    });
+
+    var center = new THREE.Vector3();
+    box.getCenter(center);
+
+    points.forEach(function (p) {
+      p.sub(center);
+    });
+  }
+
+  /* =========================================================
+     EMPTY MESSAGE
+     ========================================================= */
+
+  function addEmptyMessage() {
+    var geometry = new THREE.BoxGeometry(1, 1, 1);
+
+    var material = new THREE.MeshBasicMaterial({
+      color: 0x444444,
+      wireframe: true
+    });
+
+    var mesh = new THREE.Mesh(geometry, material);
+    meshGroup.add(mesh);
+  }
+
+  /* =========================================================
+     CAMERA
+     ========================================================= */
+
+  function updateCamera() {
+    if (!camera || !window.view3d) return;
+
+    var rotX = num(window.view3d.rotX, -25);
+    var rotY = num(window.view3d.rotY, 35);
+    var dist = num(window.view3d.dist, 900);
+
+    var rx = degToRad(rotX);
+    var ry = degToRad(rotY);
+
+    camera.position.x = dist * Math.cos(rx) * Math.sin(ry);
+    camera.position.y = dist * Math.sin(rx);
+    camera.position.z = dist * Math.cos(rx) * Math.cos(ry);
+
+    camera.lookAt(0, 0, 0);
+  }
+
+  /* =========================================================
+     ANIMATION
+     ========================================================= */
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    if (!renderer) return;
+
+    if (window.view3d && window.view3d.autoRotate) {
+      window.view3d.rotY += 0.35;
+    }
+
+    updateCamera();
+    renderer.render(scene, camera);
+  }
+
+  /* =========================================================
+     VIEW SWITCH
+     ========================================================= */
+
+  function setView(viewName) {
+    if (viewName !== "complete" && viewName !== "reverse") {
+      viewName = "complete";
+    }
+
+    currentView = viewName;
+    draw();
+  }
+
+  /* =========================================================
+     ZOOM
+     ========================================================= */
+
+  function zoomIn() {
+    if (!window.view3d) return;
+    window.view3d.dist *= 0.8;
+    window.view3d.dist = Math.max(100, Math.min(5000, window.view3d.dist));
+  }
+
+  function zoomOut() {
+    if (!window.view3d) return;
+    window.view3d.dist *= 1.2;
+    window.view3d.dist = Math.max(100, Math.min(5000, window.view3d.dist));
+  }
+
+  /* =========================================================
+     RESET
+     ========================================================= */
+
+  function reset() {
+    if (!window.view3d) return;
+
+    window.view3d.rotX = -25;
+    window.view3d.rotY = 35;
+    window.view3d.dist = 900;
+
+    window.view3d.autoRotate = false;
+    window.view3d.wireframe = false;
+
+    var autoBtn = getEl("btn-auto-rotate");
+    var wireBtn = getEl("btn-wireframe");
+
+    if (autoBtn) autoBtn.classList.remove("active");
+    if (wireBtn) wireBtn.classList.remove("active");
+
+    draw();
+  }
+
+  /* =========================================================
+     INIT BUTTONS
+     ========================================================= */
+
+  function init() {
+    var btnZoomIn = getEl("btn-zoom-in-3d");
+    var btnZoomOut = getEl("btn-zoom-out-3d");
+    var btnReset = getEl("btn-reset-3d");
+    var btnWireframe = getEl("btn-wireframe");
+    var btnAutoRotate = getEl("btn-auto-rotate");
+
+    if (btnZoomIn) btnZoomIn.onclick = zoomIn;
+    if (btnZoomOut) btnZoomOut.onclick = zoomOut;
+    if (btnReset) btnReset.onclick = reset;
+
+    if (btnWireframe) {
+      btnWireframe.onclick = function () {
+        window.view3d.wireframe = !window.view3d.wireframe;
+        this.classList.toggle("active", window.view3d.wireframe);
+        draw();
+      };
+    }
+
+    if (btnAutoRotate) {
+      btnAutoRotate.onclick = function () {
+        window.view3d.autoRotate = !window.view3d.autoRotate;
+        this.classList.toggle("active", window.view3d.autoRotate);
+      };
+    }
+  }
+
+  /* =========================================================
+     EXPOSE
+     ========================================================= */
+
+  window.ThreeD = {
+    init: init,
+    draw: draw,
+    setView: setView,
+    zoomIn: zoomIn,
+    zoomOut: zoomOut,
+    reset: reset
+  };
+
+})();
