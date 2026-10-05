@@ -2,21 +2,13 @@
    3D VIEW — MASTER GEOMETRY V4
    Sheet Metal Complete 3D + Reverse/Flat View
 
-   IMPORTANT:
-   - Engineering calculation yahan nahi hoti.
-   - GeometryEngine.analyze() MASTER DATA hai.
-   - Length + Depth dono ek hi project ke part hain.
-   - Bend angle + UP/DOWN + sequence use hota hai.
-   - Cup cuts / notches GeometryEngine se aate hain.
-   - Mobile touch + mouse rotation supported.
+   FIX V5:
+   - GeometryEngine.analyze() ko state pass kiya
+   - Ab Settings + Lines dono calculation mein use honge
    ========================================================= */
 
 (function () {
   "use strict";
-
-  // =========================================================
-  // GLOBALS
-  // =========================================================
 
   var scene = null;
   var camera = null;
@@ -31,14 +23,7 @@
   var lastX = 0;
   var lastY = 0;
 
-  // 3D scale
-  // Geometry data inch mein hai.
-  // 1 inch = 100 Three.js units.
   var SCALE = 100;
-
-  // =========================================================
-  // HELPERS
-  // =========================================================
 
   function getEl(id) {
     return document.getElementById(id);
@@ -58,13 +43,9 @@
 
     while (group.children.length) {
       var obj = group.children[0];
-
       group.remove(obj);
 
-      if (obj.geometry) {
-        obj.geometry.dispose();
-      }
-
+      if (obj.geometry) obj.geometry.dispose();
       if (obj.material) {
         if (Array.isArray(obj.material)) {
           obj.material.forEach(function (m) {
@@ -77,16 +58,10 @@
     }
   }
 
-  // =========================================================
-  // SETUP
-  // =========================================================
-
   function setup3D() {
-
     if (ready) return;
 
     canvasEl = getEl("canvas3d");
-
     if (!canvasEl) return;
 
     if (typeof THREE === "undefined") {
@@ -97,17 +72,8 @@
     var width = canvasEl.clientWidth || 320;
     var height = canvasEl.clientHeight || 320;
 
-    // -------------------------------------------------------
-    // SCENE
-    // -------------------------------------------------------
-
     scene = new THREE.Scene();
-
     scene.background = new THREE.Color(0x0a0d14);
-
-    // -------------------------------------------------------
-    // CAMERA
-    // -------------------------------------------------------
 
     camera = new THREE.PerspectiveCamera(
       45,
@@ -116,100 +82,48 @@
       100000
     );
 
-    // -------------------------------------------------------
-    // RENDERER
-    // -------------------------------------------------------
-
     renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true
     });
 
-    renderer.setPixelRatio(
-      Math.min(window.devicePixelRatio || 1, 2)
-    );
-
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(width, height);
 
     canvasEl.innerHTML = "";
     canvasEl.appendChild(renderer.domElement);
 
-    // -------------------------------------------------------
-    // GROUP
-    // -------------------------------------------------------
-
     meshGroup = new THREE.Group();
-
     scene.add(meshGroup);
 
-    // -------------------------------------------------------
-    // LIGHTS
-    // -------------------------------------------------------
-
-    var ambient = new THREE.AmbientLight(
-      0xffffff,
-      0.75
-    );
-
+    var ambient = new THREE.AmbientLight(0xffffff, 0.75);
     scene.add(ambient);
 
-    var light1 = new THREE.DirectionalLight(
-      0xffffff,
-      1.0
-    );
-
+    var light1 = new THREE.DirectionalLight(0xffffff, 1.0);
     light1.position.set(1, 2, 3);
-
     scene.add(light1);
 
-    var light2 = new THREE.DirectionalLight(
-      0xffffff,
-      0.5
-    );
-
+    var light2 = new THREE.DirectionalLight(0xffffff, 0.5);
     light2.position.set(-2, 1, -2);
-
     scene.add(light2);
-
-    // -------------------------------------------------------
-    // EVENTS
-    // -------------------------------------------------------
 
     bindEvents();
 
     ready = true;
-
     updateCamera();
-
     animate();
   }
 
-  // =========================================================
-  // EVENTS
-  // =========================================================
-
   function bindEvents() {
-
     if (!canvasEl) return;
 
-    // -------------------------------------------------------
-    // MOUSE DOWN
-    // -------------------------------------------------------
-
     canvasEl.addEventListener("mousedown", function (e) {
-
       isDragging = true;
-
       lastX = e.clientX;
       lastY = e.clientY;
     });
 
-    // -------------------------------------------------------
-    // MOUSE MOVE
-    // -------------------------------------------------------
-
     canvasEl.addEventListener("mousemove", function (e) {
-
       if (!isDragging) return;
 
       var dx = e.clientX - lastX;
@@ -227,10 +141,6 @@
       lastY = e.clientY;
     });
 
-    // -------------------------------------------------------
-    // MOUSE UP
-    // -------------------------------------------------------
-
     canvasEl.addEventListener("mouseup", function () {
       isDragging = false;
     });
@@ -239,43 +149,27 @@
       isDragging = false;
     });
 
-    // -------------------------------------------------------
-    // TOUCH START
-    // -------------------------------------------------------
-
     canvasEl.addEventListener(
       "touchstart",
       function (e) {
-
         if (e.touches.length !== 1) return;
-
         isDragging = true;
-
         lastX = e.touches[0].clientX;
         lastY = e.touches[0].clientY;
       },
       { passive: true }
     );
 
-    // -------------------------------------------------------
-    // TOUCH MOVE
-    // -------------------------------------------------------
-
     canvasEl.addEventListener(
       "touchmove",
       function (e) {
-
         if (!isDragging) return;
-
         if (e.touches.length !== 1) return;
 
         e.preventDefault();
 
-        var dx =
-          e.touches[0].clientX - lastX;
-
-        var dy =
-          e.touches[0].clientY - lastY;
+        var dx = e.touches[0].clientX - lastX;
+        var dy = e.touches[0].clientY - lastY;
 
         window.view3d.rotY += dx * 0.5;
         window.view3d.rotX += dy * 0.5;
@@ -291,30 +185,16 @@
       { passive: false }
     );
 
-    // -------------------------------------------------------
-    // TOUCH END
-    // -------------------------------------------------------
-
-    canvasEl.addEventListener(
-      "touchend",
-      function () {
-        isDragging = false;
-      }
-    );
-
-    // -------------------------------------------------------
-    // WHEEL ZOOM
-    // -------------------------------------------------------
+    canvasEl.addEventListener("touchend", function () {
+      isDragging = false;
+    });
 
     canvasEl.addEventListener(
       "wheel",
       function (e) {
-
         e.preventDefault();
 
-        var factor =
-          e.deltaY > 0 ? 1.12 : 0.88;
-
+        var factor = e.deltaY > 0 ? 1.12 : 0.88;
         window.view3d.dist *= factor;
 
         window.view3d.dist = Math.max(
@@ -325,27 +205,13 @@
       { passive: false }
     );
 
-    // -------------------------------------------------------
-    // RESIZE
-    // -------------------------------------------------------
-
-    window.addEventListener(
-      "resize",
-      function () {
-
-        if (!renderer || !camera) return;
-
-        resize();
-      }
-    );
+    window.addEventListener("resize", function () {
+      if (!renderer || !camera) return;
+      resize();
+    });
   }
 
-  // =========================================================
-  // RESIZE
-  // =========================================================
-
   function resize() {
-
     if (!canvasEl || !renderer || !camera) return;
 
     var width = canvasEl.clientWidth;
@@ -354,462 +220,213 @@
     if (!width || !height) return;
 
     camera.aspect = width / height;
-
     camera.updateProjectionMatrix();
-
     renderer.setSize(width, height);
   }
 
-  // =========================================================
-  // GET MASTER DATA
-  // =========================================================
+  /* =========================================================
+     MASTER DATA — YAHAN FIX KIYA
+     ========================================================= */
 
   function getMasterData() {
-
     if (!window.GeometryEngine) {
-      console.error(
-        "GeometryEngine not found."
-      );
-
+      console.error("GeometryEngine not found.");
       return null;
     }
 
     try {
-
-      return window.GeometryEngine.analyze();
-
+      // ✅ FIX: state pass karo
+      var state = window.AppState || window.state || {};
+      return window.GeometryEngine.analyze(state);
     } catch (err) {
-
-      console.error(
-        "3D GeometryEngine error:",
-        err
-      );
-
+      console.error("3D GeometryEngine error:", err);
       return null;
     }
   }
 
-  // =========================================================
-  // DRAW
-  // =========================================================
-
   function draw() {
-
-    if (!ready) {
-      setup3D();
-    }
-
+    if (!ready) setup3D();
     if (!ready) return;
 
     clearGroup(meshGroup);
 
     var data = getMasterData();
-
     if (!data) return;
 
     if (currentView === "reverse") {
-
       buildReverseView(data);
-
     } else {
-
       buildCompleteView(data);
     }
 
     updateCamera();
   }
 
-  // =========================================================
-  // COMPLETE BENT SHEET
-  // =========================================================
-
   function buildCompleteView(data) {
-
     var lines = [];
 
-    // -------------------------------------------------------
-    // MASTER DATA
-    // -------------------------------------------------------
-
     if (Array.isArray(data.lengthLines)) {
-
-      lines = lines.concat(
-        data.lengthLines
-      );
+      lines = lines.concat(data.lengthLines);
     }
 
     if (Array.isArray(data.depthLines)) {
-
-      lines = lines.concat(
-        data.depthLines
-      );
+      lines = lines.concat(data.depthLines);
     }
-
-    // -------------------------------------------------------
-    // FALLBACK — THREE D DATA
-    // -------------------------------------------------------
 
     if (
       lines.length === 0 &&
       data.threeD
     ) {
-
-      if (
-        Array.isArray(data.threeD.length)
-      ) {
-
-        lines = lines.concat(
-          data.threeD.length
-        );
+      if (Array.isArray(data.threeD.length)) {
+        lines = lines.concat(data.threeD.length);
       }
-
-      if (
-        Array.isArray(data.threeD.depth)
-      ) {
-
-        lines = lines.concat(
-          data.threeD.depth
-        );
+      if (Array.isArray(data.threeD.depth)) {
+        lines = lines.concat(data.threeD.depth);
       }
     }
 
     if (lines.length === 0) {
-
       addEmptyMessage();
-
       return;
     }
 
-    // -------------------------------------------------------
-    // BUILD CONNECTED SHEET PATH
-    // -------------------------------------------------------
-
     var points = [];
-
-    var cursor =
-      new THREE.Vector3(
-        0,
-        0,
-        0
-      );
-
-    var direction =
-      new THREE.Vector3(
-        1,
-        0,
-        0
-      );
-
-    var up =
-      new THREE.Vector3(
-        0,
-        1,
-        0
-      );
-
-    var normal =
-      new THREE.Vector3(
-        0,
-        0,
-        1
-      );
+    var cursor = new THREE.Vector3(0, 0, 0);
+    var direction = new THREE.Vector3(1, 0, 0);
+    var up = new THREE.Vector3(0, 1, 0);
+    var normal = new THREE.Vector3(0, 0, 1);
 
     points.push(cursor.clone());
 
     for (var i = 0; i < lines.length; i++) {
-
       var line = lines[i];
 
-      var size =
-        num(
-          line.sizeInch,
-          num(line.size, 0)
-        );
+      var size = num(
+        line.sizeInch,
+        num(line.size, 0)
+      );
 
       if (size <= 0) continue;
 
-      var next =
-        cursor.clone().add(
-          direction
-            .clone()
-            .multiplyScalar(
-              size * SCALE
-            )
-        );
+      var next = cursor.clone().add(
+        direction.clone().multiplyScalar(size * SCALE)
+      );
 
       points.push(next.clone());
 
-      // -----------------------------------------------------
-      // BEND
-      // -----------------------------------------------------
+      var angle = num(
+        line.effectiveAngleDeg,
+        num(line.effectiveAngle, 0)
+      );
 
-      var angle =
-        num(
-          line.effectiveAngleDeg,
-          num(line.effectiveAngle, 0)
-        );
-
-      if (
-        !angle &&
-        line.angle !== undefined
-      ) {
-        angle = num(
-          line.angle,
-          0
-        );
+      if (!angle && line.angle !== undefined) {
+        angle = num(line.angle, 0);
       }
 
       if (angle !== 0) {
+        var bendDirection = String(
+          line.direction || "UP"
+        ).toUpperCase();
 
-        var bendDirection =
-          String(
-            line.direction || "UP"
-          ).toUpperCase();
+        var sign = bendDirection === "DOWN" ? -1 : 1;
+        var axis = up.clone();
 
-        var sign =
-          bendDirection === "DOWN"
-            ? -1
-            : 1;
-
-        var axis =
-          up.clone();
-
-        direction.applyAxisAngle(
-          axis,
-          degToRad(angle) * sign
-        );
-
+        direction.applyAxisAngle(axis, degToRad(angle) * sign);
         direction.normalize();
 
-        normal.applyAxisAngle(
-          axis,
-          degToRad(angle) * sign
-        );
-
+        normal.applyAxisAngle(axis, degToRad(angle) * sign);
         normal.normalize();
       }
 
       cursor = next;
     }
 
-    // -------------------------------------------------------
-    // CENTER MODEL
-    // -------------------------------------------------------
-
     centerPoints(points);
-
-    // -------------------------------------------------------
-    // SHEET MATERIAL
-    // -------------------------------------------------------
-
-    buildBentSheet(
-      points,
-      data
-    );
-
-    // -------------------------------------------------------
-    // BEND MARKERS
-    // -------------------------------------------------------
-
-    buildBendMarkers(
-      points,
-      lines
-    );
-
-    // -------------------------------------------------------
-    // CUTS
-    // -------------------------------------------------------
-
-    build3DCuts(
-      data
-    );
-
-    // -------------------------------------------------------
-    // AXIS / FLOOR
-    // -------------------------------------------------------
-
-    buildReferenceGrid(
-      points
-    );
+    buildBentSheet(points, data);
+    buildBendMarkers(points, lines);
+    build3DCuts(data);
+    buildReferenceGrid(points);
   }
 
-  // =========================================================
-  // BENT SHEET
-  // =========================================================
-
-  function buildBentSheet(
-    points,
-    data
-  ) {
-
+  function buildBentSheet(points, data) {
     if (points.length < 2) return;
 
-    var thicknessMM =
-      num(
-        data.settings &&
-        data.settings.thickness,
-        0.8
-      );
+    var thicknessMM = num(
+      data.settings && data.settings.thickness,
+      0.8
+    );
 
-    // mm ko inch mein
-    var thicknessIn =
-      thicknessMM / 25.4;
+    var thicknessIn = thicknessMM / 25.4;
+    var thickness = Math.max(thicknessIn * SCALE, 1);
 
-    var thickness =
-      Math.max(
-        thicknessIn * SCALE,
-        1
-      );
+    var material = new THREE.MeshStandardMaterial({
+      color: 0xbfc5ca,
+      metalness: 0.8,
+      roughness: 0.28,
+      side: THREE.DoubleSide
+    });
 
-    var material =
-      new THREE.MeshStandardMaterial({
-
-        color: 0xbfc5ca,
-
-        metalness: 0.8,
-
-        roughness: 0.28,
-
-        side: THREE.DoubleSide
-      });
-
-    // -------------------------------------------------------
-    // Har leg ko rectangular sheet strip
-    // -------------------------------------------------------
-
-    for (
-      var i = 0;
-      i < points.length - 1;
-      i++
-    ) {
-
+    for (var i = 0; i < points.length - 1; i++) {
       var a = points[i];
       var b = points[i + 1];
 
-      var length =
-        a.distanceTo(b);
-
+      var length = a.distanceTo(b);
       if (length <= 0) continue;
 
-      var midpoint =
-        a.clone()
-          .add(b)
-          .multiplyScalar(0.5);
+      var midpoint = a.clone().add(b).multiplyScalar(0.5);
 
-      var geometry =
-        new THREE.BoxGeometry(
-          length,
-          thickness,
-          thickness
-        );
-
-      var mesh =
-        new THREE.Mesh(
-          geometry,
-          material.clone()
-        );
-
-      mesh.position.copy(
-        midpoint
+      var geometry = new THREE.BoxGeometry(
+        length,
+        thickness,
+        thickness
       );
 
+      var mesh = new THREE.Mesh(geometry, material.clone());
+      mesh.position.copy(midpoint);
       mesh.lookAt(b);
-
-      // Sheet ko visible flat strip
       meshGroup.add(mesh);
     }
   }
 
-  // =========================================================
-  // BEND MARKERS
-  // =========================================================
-
-  function buildBendMarkers(
-    points,
-    lines
-  ) {
-
+  function buildBendMarkers(points, lines) {
     if (points.length < 3) return;
 
-    for (
-      var i = 1;
-      i < points.length - 1;
-      i++
-    ) {
+    for (var i = 1; i < points.length - 1; i++) {
+      var point = points[i];
 
-      var point =
-        points[i];
+      var geometry = new THREE.TorusGeometry(4, 1.2, 8, 16);
 
-      var geometry =
-        new THREE.TorusGeometry(
-          4,
-          1.2,
-          8,
-          16
-        );
+      var material = new THREE.MeshBasicMaterial({
+        color: 0xff3333,
+        wireframe: !!window.view3d.wireframe
+      });
 
-      var material =
-        new THREE.MeshBasicMaterial({
-          color: 0xff3333,
-          wireframe:
-            !!window.view3d.wireframe
-        });
-
-      var marker =
-        new THREE.Mesh(
-          geometry,
-          material
-        );
-
-      marker.position.copy(
-        point
-      );
-
+      var marker = new THREE.Mesh(geometry, material);
+      marker.position.copy(point);
       meshGroup.add(marker);
 
-      // -----------------------------------------------------
-      // Bend angle line
-      // -----------------------------------------------------
-
-      var lineData =
-        lines[i - 1];
-
+      var lineData = lines[i - 1];
       if (!lineData) continue;
 
-      var angle =
-        num(
-          lineData.effectiveAngleDeg,
-          num(lineData.angle, 0)
-        );
+      var angle = num(
+        lineData.effectiveAngleDeg,
+        num(lineData.angle, 0)
+      );
 
       if (!angle) continue;
-
-      addAngleMarker(
-        point,
-        angle
-      );
+      addAngleMarker(point, angle);
     }
   }
 
-  // =========================================================
-  // ANGLE MARKER
-  // =========================================================
-
-  function addAngleMarker(
-    position,
-    angle
-  ) {
-
+  function addAngleMarker(position, angle) {
     var length = 12;
 
     var points = [
-
       new THREE.Vector3(
         position.x - length,
         position.y,
         position.z
       ),
-
       new THREE.Vector3(
         position.x + length,
         position.y,
@@ -817,867 +434,153 @@
       )
     ];
 
-    var geometry =
-      new THREE.BufferGeometry()
-        .setFromPoints(points);
+    var geometry = new THREE.BufferGeometry().setFromPoints(points);
 
-    var material =
-      new THREE.LineBasicMaterial({
-        color: 0xffb020
-      });
+    var material = new THREE.LineBasicMaterial({
+      color: 0xffb020
+    });
 
-    var line =
-      new THREE.Line(
-        geometry,
-        material
-      );
-
+    var line = new THREE.Line(geometry, material);
     meshGroup.add(line);
   }
 
-  // =========================================================
-  // 3D CUTS
-  // =========================================================
-
   function build3DCuts(data) {
+    var cuts = Array.isArray(data.cuts) ? data.cuts : [];
 
-    var cuts =
-      Array.isArray(data.cuts)
-        ? data.cuts
-        : [];
-
-    for (
-      var i = 0;
-      i < cuts.length;
-      i++
-    ) {
-
+    for (var i = 0; i < cuts.length; i++) {
       var cut = cuts[i];
-
       if (!cut) continue;
 
-      var pos =
-        cut.position || {};
+      var pos = cut.position || {};
 
-      var x =
-        num(pos.x, 0) * SCALE;
-
-      var y =
-        num(pos.y, 0) * SCALE;
-
+      var x = num(pos.x, 0) * SCALE;
+      var y = num(pos.y, 0) * SCALE;
       var z = 2;
 
-      var width =
-        num(
-          cut.widthIn,
-          num(
-            cut.width,
-            0.1
-          )
-        ) * SCALE;
+      var width = num(
+        cut.widthIn,
+        num(cut.width, 0.1)
+      ) * SCALE;
 
-      var depth =
-        num(
-          cut.depthIn,
-          num(
-            cut.depth,
-            width / SCALE
-          )
-        ) * SCALE;
+      var depth = num(
+        cut.depthIn,
+        num(cut.depth, width / SCALE)
+      ) * SCALE;
 
-      width =
-        Math.max(
-          width,
-          3
-        );
+      width = Math.max(width, 3);
+      depth = Math.max(depth, 3);
 
-      depth =
-        Math.max(
-          depth,
-          3
-        );
+      var geometry = new THREE.BoxGeometry(width, depth, 3);
 
-      var geometry =
-        new THREE.BoxGeometry(
-          width,
-          depth,
-          3
-        );
+      var material = new THREE.MeshBasicMaterial({
+        color: 0xff0000,
+        transparent: true,
+        opacity: 0.85
+      });
 
-      var material =
-        new THREE.MeshBasicMaterial({
-          color: 0xff0000,
-          transparent: true,
-          opacity: 0.85
-        });
-
-      var mesh =
-        new THREE.Mesh(
-          geometry,
-          material
-        );
-
-      mesh.position.set(
-        x,
-        y,
-        z
-      );
-
+      var mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(x, y, z);
       meshGroup.add(mesh);
     }
   }
 
-  // =========================================================
-  // REVERSE / FLAT VIEW
-  // =========================================================
-
   function buildReverseView(data) {
-
-    var sheet =
-      data.sheet;
+    var sheet = data.sheet;
 
     if (!sheet) {
-
       addEmptyMessage();
-
       return;
     }
 
-    var width =
-      num(
-        sheet.widthIn,
-        num(sheet.width, 0)
-      );
+    var width = num(sheet.widthIn, num(sheet.width, 0));
+    var height = num(sheet.heightIn, num(sheet.height, 0));
 
-    var height =
-      num(
-        sheet.heightIn,
-        num(sheet.height, 0)
-      );
-
-    if (
-      width <= 0 ||
-      height <= 0
-    ) {
-
+    if (width <= 0 || height <= 0) {
       addEmptyMessage();
-
       return;
     }
 
     width *= SCALE;
     height *= SCALE;
 
-    // -------------------------------------------------------
-    // SHEET
-    // -------------------------------------------------------
+    var geometry = new THREE.BoxGeometry(width, height, 3);
 
-    var geometry =
-      new THREE.BoxGeometry(
-        width,
-        height,
-        3
-      );
+    var material = new THREE.MeshStandardMaterial({
+      color: 0xbfc5ca,
+      metalness: 0.75,
+      roughness: 0.3,
+      transparent: true,
+      opacity: 0.82,
+      side: THREE.DoubleSide
+    });
 
-    var material =
-      new THREE.MeshStandardMaterial({
+    var sheetMesh = new THREE.Mesh(geometry, material);
+    sheetMesh.position.set(width / 2, height / 2, 0);
 
-        color: 0xbfc5ca,
+    meshGroup.add(sheetMesh);
 
-        metalness: 0.75,
+    var lengthLines = Array.isArray(data.lengthLines)
+      ? data.lengthLines
+      : [];
 
-        roughness: 0.3,
+    lengthLines.forEach(function (line) {
+      var pos = num(line.positionInch, num(line.position, 0));
 
-        transparent: true,
+      if (pos < 0 || pos > width / SCALE) return;
 
-        opacity: 0.82,
+      var x = pos * SCALE;
+      addFlatLine(x, 0, x, height, 0x2563eb);
+    });
 
-        side: THREE.DoubleSide
-      });
+    var depthLines = Array.isArray(data.depthLines)
+      ? data.depthLines
+      : [];
 
-    var sheetMesh =
-      new THREE.Mesh(
-        geometry,
-        material
-      );
+    depthLines.forEach(function (line) {
+      var pos = num(line.positionInch, num(line.position, 0));
 
-    sheetMesh.position.set(
-      width / 2,
-      height / 2,
-      0
-    );
+      if (pos < 0 || pos > height / SCALE) return;
 
-    meshGroup.add(
-      sheetMesh
-    );
+      var y = pos * SCALE;
+      addFlatLine(0, y, width, y, 0x2563eb);
+    });
 
-    // -------------------------------------------------------
-    // LENGTH MARKING LINES
-    // -------------------------------------------------------
+    buildFlatCuts(data);
 
-    var lengthLines =
-      Array.isArray(
-        data.lengthLines
-      )
-        ? data.lengthLines
-        : [];
+    sheetMesh.position.x = width / 2;
+    sheetMesh.position.y = height / 2;
 
-    lengthLines.forEach(
-      function (line) {
-
-        var pos =
-          num(
-            line.positionInch,
-            num(
-              line.position,
-              0
-            )
-          );
-
-        if (
-          pos < 0 ||
-          pos > width / SCALE
-        ) return;
-
-        var x =
-          pos * SCALE;
-
-        addFlatLine(
-          x,
-          0,
-          x,
-          height,
-          0x2563eb
-        );
-      }
-    );
-
-    // -------------------------------------------------------
-    // DEPTH MARKING LINES
-    // -------------------------------------------------------
-
-    var depthLines =
-      Array.isArray(
-        data.depthLines
-      )
-        ? data.depthLines
-        : [];
-
-    depthLines.forEach(
-      function (line) {
-
-        var pos =
-          num(
-            line.positionInch,
-            num(
-              line.position,
-              0
-            )
-          );
-
-        if (
-          pos < 0 ||
-          pos > height / SCALE
-        ) return;
-
-        var y =
-          pos * SCALE;
-
-        addFlatLine(
-          0,
-          y,
-          width,
-          y,
-          0x2563eb
-        );
-      }
-    );
-
-    // -------------------------------------------------------
-    // CUTS
-    // -------------------------------------------------------
-
-    buildFlatCuts(
-      data
-    );
-
-    // -------------------------------------------------------
-    // CENTER
-    // -------------------------------------------------------
-
-    sheetMesh.position.x =
-      width / 2;
-
-    sheetMesh.position.y =
-      height / 2;
-
-    // -------------------------------------------------------
-    // OUTLINE
-    // -------------------------------------------------------
-
-    addRectangleOutline(
-      width,
-      height
-    );
+    addRectangleOutline(width, height);
   }
 
-  // =========================================================
-  // FLAT LINE
-  // =========================================================
+  function addFlatLine(x1, y1, x2, y2, color) {
+    var geometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(x1, y1, 3),
+      new THREE.Vector3(x2, y2, 3)
+    ]);
 
-  function addFlatLine(
-    x1,
-    y1,
-    x2,
-    y2,
-    color
-  ) {
-
-    var geometry =
-      new THREE.BufferGeometry()
-        .setFromPoints([
-
-          new THREE.Vector3(
-            x1,
-            y1,
-            3
-          ),
-
-          new THREE.Vector3(
-            x2,
-            y2,
-            3
-          )
-        ]);
-
-    var material =
-      new THREE.LineBasicMaterial({
-        color: color
-      });
-
-    var line =
-      new THREE.Line(
-        geometry,
-        material
-      );
-
+    var material = new THREE.LineBasicMaterial({ color: color });
+    var line = new THREE.Line(geometry, material);
     meshGroup.add(line);
   }
 
-  // =========================================================
-  // FLAT CUTS
-  // =========================================================
+  function buildFlatCuts(data) {
+    var cuts = Array.isArray(data.cuts) ? data.cuts : [];
 
-  function buildFlatCuts(
-    data
-  ) {
+    cuts.forEach(function (cut) {
+      var pos = cut.position || {};
 
-    var cuts =
-      Array.isArray(data.cuts)
-        ? data.cuts
-        : [];
+      var x = num(pos.x, 0) * SCALE;
+      var y = num(pos.y, 0) * SCALE;
 
-    cuts.forEach(
-      function (cut) {
+      var w = num(cut.widthIn, num(cut.width, 0.1)) * SCALE;
+      var h = num(cut.depthIn, num(cut.depth, 0.1)) * SCALE;
 
-        var pos =
-          cut.position || {};
-
-        var x =
-          num(pos.x, 0) *
-          SCALE;
-
-        var y =
-          num(pos.y, 0) *
-          SCALE;
-
-        var w =
-          num(
-            cut.widthIn,
-            num(cut.width, 0.1)
-          ) *
-          SCALE;
-
-        var h =
-          num(
-            cut.depthIn,
-            num(cut.depth, 0.1)
-          ) *
-          SCALE;
-
-        var geometry =
-          new THREE.BoxGeometry(
-            Math.max(w, 4),
-            Math.max(h, 4),
-            5
-          );
-
-        var material =
-          new THREE.MeshBasicMaterial({
-            color: 0xff0000
-          });
-
-        var mesh =
-          new THREE.Mesh(
-            geometry,
-            material
-          );
-
-        mesh.position.set(
-          x,
-          y,
-          5
-        );
-
-        meshGroup.add(mesh);
-      }
-    );
-  }
-
-  // =========================================================
-  // SHEET OUTLINE
-  // =========================================================
-
-  function addRectangleOutline(
-    width,
-    height
-  ) {
-
-    var points = [
-
-      new THREE.Vector3(
-        0,
-        0,
-        6
-      ),
-
-      new THREE.Vector3(
-        width,
-        0,
-        6
-      ),
-
-      new THREE.Vector3(
-        width,
-        height,
-        6
-      ),
-
-      new THREE.Vector3(
-        0,
-        height,
-        6
-      ),
-
-      new THREE.Vector3(
-        0,
-        0,
-        6
-      )
-    ];
-
-    var geometry =
-      new THREE.BufferGeometry()
-        .setFromPoints(
-          points
-        );
-
-    var material =
-      new THREE.LineBasicMaterial({
-        color: 0xffffff
-      });
-
-    var line =
-      new THREE.Line(
-        geometry,
-        material
+      var geometry = new THREE.BoxGeometry(
+        Math.max(w, 4),
+        Math.max(h, 4),
+        5
       );
 
-    meshGroup.add(line);
-  }
-
-  // =========================================================
-  // REFERENCE GRID
-  // =========================================================
-
-  function buildReferenceGrid(
-    points
-  ) {
-
-    if (!points || points.length < 2) {
-      return;
-    }
-
-    var size = 500;
-
-    var grid =
-      new THREE.GridHelper(
-        size,
-        20,
-        0x333333,
-        0x1c1c1c
-      );
-
-    grid.rotation.x =
-      Math.PI / 2;
-
-    grid.position.z =
-      -5;
-
-    meshGroup.add(grid);
-  }
-
-  // =========================================================
-  // CENTER MODEL
-  // =========================================================
-
-  function centerPoints(
-    points
-  ) {
-
-    if (
-      !points ||
-      points.length === 0
-    ) {
-      return;
-    }
-
-    var box =
-      new THREE.Box3();
-
-    points.forEach(
-      function (p) {
-        box.expandByPoint(p);
-      }
-    );
-
-    var center =
-      new THREE.Vector3();
-
-    box.getCenter(center);
-
-    points.forEach(
-      function (p) {
-        p.sub(center);
-      }
-    );
-  }
-
-  // =========================================================
-  // EMPTY MESSAGE
-  // =========================================================
-
-  function addEmptyMessage() {
-
-    var geometry =
-      new THREE.BoxGeometry(
-        1,
-        1,
-        1
-      );
-
-    var material =
-      new THREE.MeshBasicMaterial({
-        color: 0x444444,
-        wireframe: true
-      });
-
-    var mesh =
-      new THREE.Mesh(
-        geometry,
-        material
-      );
-
-    meshGroup.add(mesh);
-  }
-
-  // =========================================================
-  // CAMERA
-  // =========================================================
-
-  function updateCamera() {
-
-    if (
-      !camera ||
-      !window.view3d
-    ) {
-      return;
-    }
-
-    var rotX =
-      num(
-        window.view3d.rotX,
-        -25
-      );
-
-    var rotY =
-      num(
-        window.view3d.rotY,
-        35
-      );
-
-    var dist =
-      num(
-        window.view3d.dist,
-        900
-      );
-
-    var rx =
-      degToRad(rotX);
-
-    var ry =
-      degToRad(rotY);
-
-    camera.position.x =
-      dist *
-      Math.cos(rx) *
-      Math.sin(ry);
-
-    camera.position.y =
-      dist *
-      Math.sin(rx);
-
-    camera.position.z =
-      dist *
-      Math.cos(rx) *
-      Math.cos(ry);
-
-    camera.lookAt(
-      0,
-      0,
-      0
-    );
-  }
-
-  // =========================================================
-  // ANIMATION
-  // =========================================================
-
-  function animate() {
-
-    requestAnimationFrame(
-      animate
-    );
-
-    if (!renderer) return;
-
-    if (
-      window.view3d &&
-      window.view3d.autoRotate
-    ) {
-
-      window.view3d.rotY += 0.35;
-    }
-
-    updateCamera();
-
-    renderer.render(
-      scene,
-      camera
-    );
-  }
-
-  // =========================================================
-  // VIEW SWITCH
-  // =========================================================
-
-  function setView(
-    viewName
-  ) {
-
-    if (
-      viewName !== "complete" &&
-      viewName !== "reverse"
-    ) {
-
-      viewName = "complete";
-    }
-
-    currentView =
-      viewName;
-
-    draw();
-  }
-
-  // =========================================================
-  // ZOOM IN
-  // =========================================================
-
-  function zoomIn() {
-
-    if (!window.view3d) return;
-
-    window.view3d.dist *= 0.8;
-
-    window.view3d.dist =
-      Math.max(
-        100,
-        Math.min(
-          5000,
-          window.view3d.dist
-        )
-      );
-  }
-
-  // =========================================================
-  // ZOOM OUT
-  // =========================================================
-
-  function zoomOut() {
-
-    if (!window.view3d) return;
-
-    window.view3d.dist *= 1.2;
-
-    window.view3d.dist =
-      Math.max(
-        100,
-        Math.min(
-          5000,
-          window.view3d.dist
-        )
-      );
-  }
-
-  // =========================================================
-  // RESET
-  // =========================================================
-
-  function reset() {
-
-    if (!window.view3d) return;
-
-    window.view3d.rotX = -25;
-    window.view3d.rotY = 35;
-    window.view3d.dist = 900;
-
-    window.view3d.autoRotate = false;
-    window.view3d.wireframe = false;
-
-    var autoBtn =
-      getEl(
-        "btn-auto-rotate"
-      );
-
-    var wireBtn =
-      getEl(
-        "btn-wireframe"
-      );
-
-    if (autoBtn) {
-      autoBtn.classList.remove(
-        "active"
-      );
-    }
-
-    if (wireBtn) {
-      wireBtn.classList.remove(
-        "active"
-      );
-    }
-
-    draw();
-  }
-
-  // =========================================================
-  // INIT BUTTONS
-  // =========================================================
-
-  function init() {
-
-    var btnZoomIn =
-      getEl(
-        "btn-zoom-in-3d"
-      );
-
-    var btnZoomOut =
-      getEl(
-        "btn-zoom-out-3d"
-      );
-
-    var btnReset =
-      getEl(
-        "btn-reset-3d"
-      );
-
-    var btnWireframe =
-      getEl(
-        "btn-wireframe"
-      );
-
-    var btnAutoRotate =
-      getEl(
-        "btn-auto-rotate"
-      );
-
-    if (btnZoomIn) {
-
-      btnZoomIn.onclick =
-        zoomIn;
-    }
-
-    if (btnZoomOut) {
-
-      btnZoomOut.onclick =
-        zoomOut;
-    }
-
-    if (btnReset) {
-
-      btnReset.onclick =
-        reset;
-    }
-
-    if (btnWireframe) {
-
-      btnWireframe.onclick =
-        function () {
-
-          window.view3d.wireframe =
-            !window.view3d.wireframe;
-
-          this.classList.toggle(
-            "active",
-            window.view3d.wireframe
-          );
-
-          draw();
-        };
-    }
-
-    if (btnAutoRotate) {
-
-      btnAutoRotate.onclick =
-        function () {
-
-          window.view3d.autoRotate =
-            !window.view3d.autoRotate;
-
-          this.classList.toggle(
-            "active",
-            window.view3d.autoRotate
-          );
-        };
-    }
-  }
-
-  // =========================================================
-  // EXPOSE
-  // =========================================================
-
-  window.ThreeD = {
-
-    init: init,
-
-    draw: draw,
-
-    setView: setView,
-
-    zoomIn: zoomIn,
-
-    zoomOut: zoomOut,
-
-    reset: reset
-  };
-
-})();
+      var material = new THREE.MeshBasicMaterial({
+        color: 0
