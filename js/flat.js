@@ -1,10 +1,6 @@
 /* =========================================================
-   FLAT VIEW — MASTER GEOMETRY V4
-   2D Flat Sheet Marking / Bend / Cup Cut View
-
-   FIX V5:
-   - GeometryEngine.analyze() ko state pass kiya
-   - Ab Settings + Lines dono calculation mein use honge
+   FLAT VIEW — MASTER GEOMETRY V5
+   FIX V5: GeometryEngine.analyze() ko state pass kiya
    ========================================================= */
 
 (function () {
@@ -38,33 +34,23 @@
 
   function formatNumber(value) {
     var n = num(value, 0);
-
     if (Math.abs(n - Math.round(n)) < 0.0001) {
       return String(Math.round(n));
     }
-
     return n.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
   }
 
   function formatInch(value) {
-    if (
-      window.Core &&
-      typeof window.Core.formatInch === "function"
-    ) {
+    if (window.Core && typeof window.Core.formatInch === "function") {
       return window.Core.formatInch(value);
     }
-
     var n = num(value, 0);
-
-    if (Math.abs(n) < 0.0001) {
-      return "0";
-    }
-
+    if (Math.abs(n) < 0.0001) return "0";
     return formatNumber(n) + '"';
   }
 
   /* =========================================================
-     MASTER DATA — YAHAN FIX KIYA
+     MASTER DATA — FIX
      ========================================================= */
 
   function getMasterData() {
@@ -74,22 +60,15 @@
     }
 
     try {
-      // ✅ FIX: state pass karo
       var state = window.AppState || window.state || {};
       return window.GeometryEngine.analyze(state);
     } catch (err) {
       console.error("❌ Flat GeometryEngine error:", err);
-
       if (window.Bugs) {
         try {
-          window.Bugs.log(
-            "flat.geometry",
-            err.message,
-            err.stack
-          );
+          window.Bugs.log("flat.geometry", err.message, err.stack);
         } catch (bugErr) {}
       }
-
       return null;
     }
   }
@@ -136,16 +115,12 @@
 
     canvas.addEventListener("mousemove", function (e) {
       if (!isDragging) return;
-
       var dx = e.clientX - lastX;
       var dy = e.clientY - lastY;
-
       offsetX += dx;
       offsetY += dy;
-
       lastX = e.clientX;
       lastY = e.clientY;
-
       draw();
     });
 
@@ -161,7 +136,6 @@
       "touchstart",
       function (e) {
         if (e.touches.length !== 1) return;
-
         isDragging = true;
         lastX = e.touches[0].clientX;
         lastY = e.touches[0].clientY;
@@ -174,40 +148,29 @@
       function (e) {
         if (!isDragging) return;
         if (e.touches.length !== 1) return;
-
         e.preventDefault();
-
         var dx = e.touches[0].clientX - lastX;
         var dy = e.touches[0].clientY - lastY;
-
         offsetX += dx;
         offsetY += dy;
-
         lastX = e.touches[0].clientX;
         lastY = e.touches[0].clientY;
-
         draw();
       },
       { passive: false }
     );
 
-    canvas.addEventListener(
-      "touchend",
-      function () {
-        isDragging = false;
-      }
-    );
+    canvas.addEventListener("touchend", function () {
+      isDragging = false;
+    });
 
     canvas.addEventListener(
       "wheel",
       function (e) {
         e.preventDefault();
-
         var factor = e.deltaY > 0 ? 0.9 : 1.1;
         scale *= factor;
-
         scale = Math.max(minScale, Math.min(maxScale, scale));
-
         draw();
       },
       { passive: false }
@@ -240,7 +203,6 @@
 
     canvas.width = Math.max(1, Math.floor(width * ratio));
     canvas.height = Math.max(1, Math.floor(height * ratio));
-
     canvas.style.width = width + "px";
     canvas.style.height = height + "px";
 
@@ -264,14 +226,9 @@
 
     ctx.save();
     ctx.setTransform(
-      window.devicePixelRatio || 1,
-      0,
-      0,
-      window.devicePixelRatio || 1,
-      0,
-      0
+      window.devicePixelRatio || 1, 0, 0,
+      window.devicePixelRatio || 1, 0, 0
     );
-
     ctx.clearRect(0, 0, width, height);
     ctx.restore();
 
@@ -315,7 +272,6 @@
     ctx.save();
     ctx.fillStyle = "#c7ccd1";
     ctx.fillRect(x, y, width, height);
-
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 2;
     ctx.strokeRect(x, y, width, height);
@@ -330,10 +286,7 @@
     ctx.lineWidth = 1;
 
     var grid = scale;
-    if (grid < 20) {
-      ctx.restore();
-      return;
-    }
+    if (grid < 20) { ctx.restore(); return; }
 
     for (var gx = x + grid; gx < x + width; gx += grid) {
       ctx.beginPath();
@@ -365,9 +318,7 @@
     for (var i = 0; i < lengthLines.length; i++) {
       var line = lengthLines[i];
       var pos = num(line.positionInch, num(line.position, 0));
-
       if (pos < 0 || pos > sheetWidth) continue;
-
       var x = x0 + pos * scale;
       drawVerticalMark(x, y0, y0 + sheetHeight * scale, line);
     }
@@ -377,9 +328,7 @@
     for (var j = 0; j < depthLines.length; j++) {
       var dline = depthLines[j];
       var dpos = num(dline.positionInch, num(dline.position, 0));
-
       if (dpos < 0 || dpos > sheetHeight) continue;
-
       var y = y0 + dpos * scale;
       drawHorizontalMark(y, x0, x0 + sheetWidth * scale, dline);
     }
@@ -390,12 +339,10 @@
     ctx.strokeStyle = "#1677ff";
     ctx.lineWidth = 2;
     ctx.setLineDash([8, 5]);
-
     ctx.beginPath();
     ctx.moveTo(x, y1);
     ctx.lineTo(x, y2);
     ctx.stroke();
-
     ctx.setLineDash([]);
     drawLineLabel(x + 5, y1 + 18, line);
     ctx.restore();
@@ -406,12 +353,10 @@
     ctx.strokeStyle = "#1677ff";
     ctx.lineWidth = 2;
     ctx.setLineDash([8, 5]);
-
     ctx.beginPath();
     ctx.moveTo(x1, y);
     ctx.lineTo(x2, y);
     ctx.stroke();
-
     ctx.setLineDash([]);
     drawLineLabel(x1 + 5, y - 7, line);
     ctx.restore();
@@ -419,20 +364,12 @@
 
   function drawLineLabel(x, y, line) {
     if (!line) return;
-
     var id = line.id || "";
     var angle = num(line.angle, num(line.angleDeg, 0));
     var direction = String(line.direction || "").toUpperCase();
-
     var text = id;
-
-    if (angle) {
-      text += " " + formatNumber(angle) + "°";
-    }
-
-    if (direction) {
-      text += " " + direction;
-    }
+    if (angle) text += " " + formatNumber(angle) + "°";
+    if (direction) text += " " + direction;
 
     ctx.save();
     ctx.font = "bold 11px Arial";
@@ -460,16 +397,13 @@
       }
 
       var pos = cut.position || {};
-
       var xIn = num(pos.x, num(cut.x, 0));
       var yIn = num(pos.y, num(cut.y, 0));
-
       var widthIn = num(cut.widthIn, num(cut.width, 0.1));
       var depthIn = num(cut.depthIn, num(cut.depth, 0.1));
 
       var x = offsetX + xIn * scale;
       var y = offsetY + yIn * scale;
-
       var width = Math.max(4, widthIn * scale);
       var height = Math.max(4, depthIn * scale);
 
@@ -514,15 +448,8 @@
     var width = widthIn * scale;
     var height = heightIn * scale;
 
-    drawHorizontalDimension(
-      x, y - 20, x + width, y - 20,
-      formatInch(widthIn)
-    );
-
-    drawVerticalDimension(
-      x - 25, y, x - 25, y + height,
-      formatInch(heightIn)
-    );
+    drawHorizontalDimension(x, y - 20, x + width, y - 20, formatInch(widthIn));
+    drawVerticalDimension(x - 25, y, x - 25, y + height, formatInch(heightIn));
   }
 
   function drawHorizontalDimension(x1, y1, x2, y2, label) {
@@ -571,7 +498,6 @@
 
   function drawArrow(x, y, angle) {
     var size = 6;
-
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(
