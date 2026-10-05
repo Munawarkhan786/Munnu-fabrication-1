@@ -1,40 +1,39 @@
 /* =========================================================
-   SHEET — INPUT / MARKING LINE CONTROLLER V4
-   Length + Depth + Size + Angle + UP/DOWN
-
-   IMPORTANT:
-   - Engineering calculation yahan nahi hoti.
-   - GeometryEngine MASTER calculation engine hai.
-   - User input yahan state mein save hota hai.
-   - Length + Depth dono ek project ka part hain.
+   SHEET.JS — INPUT / MARKING LINE CONTROLLER V5
+   ---------------------------------------------------------
+   - Length / Depth side
+   - Number keypad
+   - Fraction keypad
+   - Current Size calculator open on tap
+   - Angle
+   - UP / DOWN
+   - Add line
+   - Edit / Delete / Move
+   - Local save
+   - Auto redraw
    ========================================================= */
 
 (function () {
   "use strict";
 
-  // =========================================================
-  // HELPERS
-  // =========================================================
+  /* =========================================================
+     HELPERS
+     ========================================================= */
 
   function $(id) {
     return document.getElementById(id);
   }
 
-  function num(value, fallback) {
-    var n = Number(value);
-    return isFinite(n) ? n : fallback;
+  function num(v) {
+    var n = parseFloat(v);
+    return Number.isFinite(n) ? n : 0;
   }
 
   function getState() {
-    if (window.AppState) {
-      return window.AppState;
-    }
+    if (window.AppState) return window.AppState;
 
-    if (window.state) {
-      return window.state;
-    }
-
-    window.state = {
+    window.AppState = {
+      keyword: "",
       activeSide: "len",
       current: 0,
       lenLines: [],
@@ -43,40 +42,32 @@
       editMode: false
     };
 
-    return window.state;
+    return window.AppState;
   }
 
   function formatSize(value) {
-    if (
-      window.Core &&
-      typeof window.Core.formatInch === "function"
-    ) {
-      return window.Core.formatInch(value);
+    var n = num(value);
+
+    if (n === 0) return "0";
+
+    if (window.Core && typeof Core.formatInch === "function") {
+      try {
+        return Core.formatInch(n);
+      } catch (e) {}
     }
 
-    var n = num(value, 0);
-
-    return n
-      .toFixed(3)
-      .replace(/0+$/, "")
-      .replace(/\.$/, "") + '"';
+    return String(Math.round(n * 10000) / 10000);
   }
 
   function getLines(side) {
     var state = getState();
 
     if (side === "dep") {
-      if (!Array.isArray(state.depLines)) {
-        state.depLines = [];
-      }
-
+      if (!Array.isArray(state.depLines)) state.depLines = [];
       return state.depLines;
     }
 
-    if (!Array.isArray(state.lenLines)) {
-      state.lenLines = [];
-    }
-
+    if (!Array.isArray(state.lenLines)) state.lenLines = [];
     return state.lenLines;
   }
 
@@ -91,877 +82,701 @@
   }
 
   function getActiveSide() {
-    var state = getState();
-
-    return state.activeSide === "dep"
-      ? "dep"
-      : "len";
+    return getState().activeSide === "dep" ? "dep" : "len";
   }
 
-  // =========================================================
-  // INPUT ELEMENTS
-  // =========================================================
+  /* =========================================================
+     INPUT DISPLAY
+     ========================================================= */
 
   function getInputValue() {
     var display = $("display");
 
-    if (!display) return "";
-
-    return String(
-      display.value !== undefined
-        ? display.value
-        : display.textContent || ""
-    ).trim();
-  }
-
-  function setInputValue(value) {
-    var display = $("display");
-
-    if (!display) return;
+    if (!display) return 0;
 
     if (
       display.tagName === "INPUT" ||
       display.tagName === "TEXTAREA"
     ) {
-      display.value = value;
+      return num(display.value);
+    }
+
+    return num(display.textContent);
+  }
+
+  function setInputValue(value) {
+    var display = $("display");
+    var state = getState();
+
+    value = num(value);
+    state.current = value;
+
+    if (!display) return;
+
+    var text = formatSize(value);
+
+    if (
+      display.tagName === "INPUT" ||
+      display.tagName === "TEXTAREA"
+    ) {
+      display.value = text;
     } else {
-      display.textContent = value;
+      display.textContent = text;
     }
   }
 
   function clearInput() {
-    setInputValue("");
+    setInputValue(0);
 
-    var state = getState();
-
-    state.current = 0;
+    var error = $("input-error");
+    if (error) {
+      error.textContent = "";
+      error.style.display = "none";
+    }
   }
 
-  // =========================================================
-  // ACTIVE SIDE
-  // =========================================================
+  /* =========================================================
+     CALCULATOR OPEN / CLOSE
+     ========================================================= */
+
+  function openSizeCalculator() {
+    var calc = document.querySelector(".calc-grid");
+    var frac = document.querySelector(".frac-grid");
+
+    if (calc) {
+      calc.style.display = "grid";
+      calc.classList.add("open");
+    }
+
+    if (frac) {
+      frac.style.display = "grid";
+      frac.classList.add("open");
+    }
+
+    var display = $("display");
+
+    if (display) {
+      display.classList.add("active");
+      try {
+        display.focus();
+      } catch (e) {}
+    }
+
+    var error = $("input-error");
+
+    if (error) {
+      error.textContent = "";
+      error.style.display = "none";
+    }
+  }
+
+  function closeSizeCalculator() {
+    var calc = document.querySelector(".calc-grid");
+    var frac = document.querySelector(".frac-grid");
+
+    if (calc) {
+      calc.classList.remove("open");
+    }
+
+    if (frac) {
+      frac.classList.remove("open");
+    }
+
+    var display = $("display");
+
+    if (display) {
+      display.classList.remove("active");
+    }
+  }
+
+  /* =========================================================
+     ACTIVE SIDE
+     ========================================================= */
 
   function setSide(side) {
     var state = getState();
 
-    state.activeSide =
-      side === "dep"
-        ? "dep"
-        : "len";
+    state.activeSide = side === "dep" ? "dep" : "len";
+    state.current = 0;
 
     updateSideUI();
+    clearInput();
+
+    openSizeCalculator();
   }
 
   function updateSideUI() {
     var state = getState();
 
-    var lenButton =
-      $("side-len");
+    var lenBtn = $("side-len");
+    var depBtn = $("side-dep");
 
-    var depButton =
-      $("side-dep");
-
-    if (lenButton) {
-      lenButton.classList.toggle(
-        "active",
-        state.activeSide !== "dep"
-      );
+    if (lenBtn) {
+      lenBtn.classList.toggle("active", state.activeSide === "len");
     }
 
-    if (depButton) {
-      depButton.classList.toggle(
-        "active",
-        state.activeSide === "dep"
-      );
+    if (depBtn) {
+      depBtn.classList.toggle("active", state.activeSide === "dep");
     }
   }
 
-  // =========================================================
-  // DIGIT INPUT
-  // =========================================================
+  /* =========================================================
+     NUMBER ENTRY
+     ========================================================= */
 
   function appendValue(value) {
-    var current =
-      getInputValue();
-
-    if (value === undefined) return;
+    var state = getState();
+    var current = getInputValue();
 
     value = String(value);
 
-    // -------------------------------------------------------
-    // Decimal
-    // -------------------------------------------------------
+    if (!/^\d$/.test(value)) return;
 
-    if (value === ".") {
-      if (current.indexOf(".") !== -1) {
-        return;
-      }
+    /*
+      Agar current 0 hai:
+      0 + 5 = 5
+    */
 
-      if (!current) {
-        current = "0";
-      }
-
-      setInputValue(
-        current + "."
-      );
-
+    if (current === 0) {
+      setInputValue(parseInt(value, 10));
       return;
     }
 
-    // -------------------------------------------------------
-    // Normal number
-    // -------------------------------------------------------
+    /*
+      Existing decimal/fraction value ko string ke through
+      continue karne ke liye.
+    */
 
-    if (
-      /^[0-9]$/.test(value)
-    ) {
-      setInputValue(
-        current + value
-      );
+    var display = $("display");
+
+    if (!display) return;
+
+    var oldText =
+      display.tagName === "INPUT" ||
+      display.tagName === "TEXTAREA"
+        ? display.value
+        : display.textContent;
+
+    oldText = String(oldText || "").trim();
+
+    /*
+      Agar sirf 0 hai.
+    */
+    if (oldText === "0" || oldText === "0.0") {
+      oldText = "";
+    }
+
+    /*
+      Number ko directly append.
+    */
+    var next = oldText + value;
+
+    var parsed = parseFloat(next);
+
+    if (Number.isFinite(parsed)) {
+      state.current = parsed;
+
+      if (
+        display.tagName === "INPUT" ||
+        display.tagName === "TEXTAREA"
+      ) {
+        display.value = next;
+      } else {
+        display.textContent = next;
+      }
     }
   }
 
   function backspace() {
-    var current =
-      getInputValue();
+    var display = $("display");
 
-    setInputValue(
-      current.slice(0, -1)
-    );
+    if (!display) return;
+
+    var text =
+      display.tagName === "INPUT" ||
+      display.tagName === "TEXTAREA"
+        ? display.value
+        : display.textContent;
+
+    text = String(text || "").trim();
+
+    if (!text || text === "0") {
+      clearInput();
+      return;
+    }
+
+    text = text.slice(0, -1);
+
+    if (!text || text === "-") {
+      text = "0";
+    }
+
+    var value = parseFloat(text);
+
+    if (!Number.isFinite(value)) {
+      value = 0;
+    }
+
+    setInputValue(value);
   }
 
-  function clearAllInput() {
+  function clearCalculator() {
     clearInput();
   }
 
-  // =========================================================
-  // FRACTION INPUT
-  // =========================================================
+  /* =========================================================
+     DECIMAL
+     ========================================================= */
 
-  function appendFraction(value) {
-    var fraction =
-      num(value, 0);
+  function appendDecimal() {
+    var display = $("display");
 
-    if (fraction <= 0) return;
+    if (!display) return;
 
-    var current =
-      getInputValue();
+    var text =
+      display.tagName === "INPUT" ||
+      display.tagName === "TEXTAREA"
+        ? display.value
+        : display.textContent;
 
-    if (!current) {
-      setInputValue(
-        fraction.toString()
-      );
+    text = String(text || "").trim();
 
-      return;
+    if (text.indexOf(".") !== -1) return;
+
+    if (!text || text === "0") {
+      text = "0.";
+    } else {
+      text += ".";
     }
 
-    // -------------------------------------------------------
-    // Existing whole number
-    // Example:
-    // 15 + 5/8
-    // -------------------------------------------------------
-
-    var n =
-      Number(current);
-
-    if (isFinite(n)) {
-      var whole =
-        Math.floor(n);
-
-      var result =
-        whole + fraction;
-
-      setInputValue(
-        String(result)
-      );
-
-      return;
+    if (
+      display.tagName === "INPUT" ||
+      display.tagName === "TEXTAREA"
+    ) {
+      display.value = text;
+    } else {
+      display.textContent = text;
     }
-
-    // -------------------------------------------------------
-    // Fallback
-    // -------------------------------------------------------
-
-    setInputValue(
-      current + fraction
-    );
   }
 
-  // =========================================================
-  // PARSE SIZE
-  // =========================================================
+  /* =========================================================
+     FRACTION
+     ========================================================= */
 
-  function parseSize(value) {
-    if (
-      value === undefined ||
-      value === null
-    ) {
-      return 0;
+  function appendFraction(fraction) {
+    var display = $("display");
+
+    if (!display) return;
+
+    fraction = String(fraction || "").trim();
+
+    if (!fraction) return;
+
+    var currentText =
+      display.tagName === "INPUT" ||
+      display.tagName === "TEXTAREA"
+        ? display.value
+        : display.textContent;
+
+    currentText = String(currentText || "").trim();
+
+    var whole = parseFloat(currentText);
+
+    /*
+      Agar current value decimal/fraction style nahi hai,
+      whole number ko preserve.
+    */
+
+    if (!Number.isFinite(whole)) {
+      whole = 0;
     }
 
-    var str =
-      String(value)
-        .trim()
-        .replace(/"/g, "");
+    var fractionValue = parseFloat(fraction);
 
-    if (!str) return 0;
+    if (!Number.isFinite(fractionValue)) return;
 
-    // -------------------------------------------------------
-    // Mixed fraction
-    // Example:
-    // 15 5/8
-    // -------------------------------------------------------
+    var result = whole + fractionValue;
 
-    var mixed =
-      str.match(
-        /^(-?\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)$/
-      );
+    setInputValue(result);
+  }
+
+  /* =========================================================
+     PARSE SIZE
+     ========================================================= */
+
+  function parseSize(value) {
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : 0;
+    }
+
+    var text = String(value || "")
+      .trim()
+      .replace(/"/g, "");
+
+    if (!text) return 0;
+
+    /*
+      Mixed fraction:
+      15 5/8
+    */
+
+    var mixed = text.match(
+      /^(-?\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)$/
+    );
 
     if (mixed) {
-      var whole =
-        Number(mixed[1]);
-
-      var numerator =
-        Number(mixed[2]);
-
-      var denominator =
-        Number(mixed[3]);
+      var whole = parseFloat(mixed[1]);
+      var numerator = parseFloat(mixed[2]);
+      var denominator = parseFloat(mixed[3]);
 
       if (
-        isFinite(whole) &&
-        isFinite(numerator) &&
-        isFinite(denominator) &&
+        Number.isFinite(whole) &&
+        Number.isFinite(numerator) &&
+        Number.isFinite(denominator) &&
         denominator !== 0
       ) {
-        return (
-          whole +
-          numerator / denominator
-        );
+        return whole + numerator / denominator;
       }
     }
 
-    // -------------------------------------------------------
-    // Simple fraction
-    // Example:
-    // 5/8
-    // -------------------------------------------------------
+    /*
+      Simple fraction:
+      5/8
+    */
 
-    var fraction =
-      str.match(
-        /^(-?\d+)\s*\/\s*(\d+)$/
-      );
+    var frac = text.match(
+      /^(-?\d+)\s*\/\s*(\d+)$/
+    );
 
-    if (fraction) {
-      var a =
-        Number(fraction[1]);
-
-      var b =
-        Number(fraction[2]);
+    if (frac) {
+      var a = parseFloat(frac[1]);
+      var b = parseFloat(frac[2]);
 
       if (
-        isFinite(a) &&
-        isFinite(b) &&
+        Number.isFinite(a) &&
+        Number.isFinite(b) &&
         b !== 0
       ) {
         return a / b;
       }
     }
 
-    // -------------------------------------------------------
-    // Normal decimal / number
-    // -------------------------------------------------------
+    /*
+      Normal number.
+    */
 
-    var result =
-      Number(str);
+    var n = parseFloat(text);
 
-    if (isFinite(result)) {
-      return result;
-    }
-
-    return 0;
+    return Number.isFinite(n) ? n : 0;
   }
 
-  // =========================================================
-  // ADD LINE
-  // =========================================================
+  /* =========================================================
+     ANGLE / DIRECTION
+     ========================================================= */
+
+  function getSelectedAngle() {
+    var select = $("angle-select");
+
+    if (!select) return 90;
+
+    var angle = parseFloat(select.value);
+
+    if (!Number.isFinite(angle)) {
+      angle = 90;
+    }
+
+    return angle;
+  }
+
+  function getSelectedDirection() {
+    var up = $("direction-up");
+
+    if (up && up.classList.contains("active")) {
+      return "UP";
+    }
+
+    return "DOWN";
+  }
+
+  function setDirectionUI(direction) {
+    var up = $("direction-up");
+    var down = $("direction-down");
+
+    direction = String(direction || "UP").toUpperCase();
+
+    if (up) {
+      up.classList.toggle("active", direction === "UP");
+    }
+
+    if (down) {
+      down.classList.toggle("active", direction === "DOWN");
+    }
+  }
+
+  /* =========================================================
+     ADD LINE
+     ========================================================= */
 
   function addLine() {
-    var value =
-      parseSize(
-        getInputValue()
-      );
+    var state = getState();
 
-    if (value <= 0) {
-      showMessage(
-        "Pehle size enter karo."
-      );
+    var value = getInputValue();
+    var size = parseSize(value);
 
-      return;
+    if (!Number.isFinite(size) || size <= 0) {
+      showMessage("Size daalo.", true);
+      openSizeCalculator();
+      return false;
     }
 
-    var state =
-      getState();
+    var side = getActiveSide();
+    var angle = getSelectedAngle();
+    var direction = getSelectedDirection();
 
-    var side =
-      getActiveSide();
+    var lines = getLines(side);
 
-    var lines =
-      getLines(side);
+    /*
+      EDIT MODE
+    */
 
-    // -------------------------------------------------------
-    // Current angle
-    // -------------------------------------------------------
+    if (state.editMode && state.editingLine) {
+      var editIndex = state.editingLine.index;
 
-    var angle =
-      getSelectedAngle();
+      if (
+        Number.isInteger(editIndex) &&
+        editIndex >= 0 &&
+        editIndex < lines.length
+      ) {
+        lines[editIndex].size = size;
+        lines[editIndex].angle = angle;
+        lines[editIndex].direction = direction;
 
-    // -------------------------------------------------------
-    // Direction
-    // -------------------------------------------------------
+        state.editMode = false;
+        state.editingLine = null;
 
-    var direction =
-      getSelectedDirection();
+        setLines(side, lines);
 
-    // -------------------------------------------------------
-    // Edit mode
-    // -------------------------------------------------------
+        render();
+        save();
+        redraw();
 
-    if (
-      state.editMode &&
-      state.editingLine
-    ) {
-      updateExistingLine(
-        side,
-        state.editingLine,
-        value,
-        angle,
-        direction
-      );
+        showMessage("Line updated.", false);
 
-      state.editMode = false;
-      state.editingLine = null;
+        clearInput();
+        closeSizeCalculator();
 
-      clearInput();
-
-      render();
-
-      save();
-
-      redraw();
-
-      return;
+        return true;
+      }
     }
 
-    // -------------------------------------------------------
-    // New line
-    // -------------------------------------------------------
+    /*
+      NEW LINE
+    */
 
-    var prefix =
-      side === "dep"
-        ? "D"
-        : "L";
-
-    var index =
-      lines.length + 1;
+    var prefix = side === "dep" ? "D" : "L";
 
     var line = {
-      id:
-        prefix +
-        index,
-
-      side:
-        side,
-
-      index:
-        index - 1,
-
-      sequence:
-        lines.length + 1,
-
-      sizeInch:
-        value,
-
-      size:
-        value,
-
-      angle:
-        angle,
-
-      angleDeg:
-        angle,
-
-      direction:
-        direction,
-
-      positionInch:
-        getPreviousTotal(lines),
-
-      original: {
-        sizeInch:
-          value,
-
-        angle:
-          angle,
-
-        direction:
-          direction
-      }
+      id: prefix + (lines.length + 1),
+      index: lines.length,
+      size: size,
+      angle: angle,
+      direction: direction
     };
 
     lines.push(line);
 
-    setLines(
-      side,
-      lines
-    );
+    /*
+      Re-number.
+    */
 
-    state.current =
-      value;
+    renumberLines(side);
+
+    setLines(side, lines);
+
+    render();
+    save();
+    redraw();
 
     clearInput();
 
-    render();
-
-    save();
-
-    redraw();
-  }
-
-  // =========================================================
-  // UPDATE LINE
-  // =========================================================
-
-  function updateExistingLine(
-    side,
-    lineId,
-    value,
-    angle,
-    direction
-  ) {
-    var lines =
-      getLines(side);
-
-    for (
-      var i = 0;
-      i < lines.length;
-      i++
-    ) {
-      if (
-        String(lines[i].id) ===
-        String(lineId)
-      ) {
-        lines[i].sizeInch =
-          value;
-
-        lines[i].size =
-          value;
-
-        lines[i].angle =
-          angle;
-
-        lines[i].angleDeg =
-          angle;
-
-        lines[i].direction =
-          direction;
-
-        if (!lines[i].original) {
-          lines[i].original = {};
-        }
-
-        lines[i].original.sizeInch =
-          value;
-
-        lines[i].original.angle =
-          angle;
-
-        lines[i].original.direction =
-          direction;
-
-        break;
-      }
-    }
-
-    setLines(
-      side,
-      lines
+    showMessage(
+      prefix + lines.length + " added.",
+      false
     );
+
+    closeSizeCalculator();
+
+    return true;
   }
 
-  // =========================================================
-  // PREVIOUS TOTAL
-  // =========================================================
+  /* =========================================================
+     EDIT
+     ========================================================= */
 
-  function getPreviousTotal(lines) {
-    var total = 0;
+  function editLine(side, index) {
+    var state = getState();
 
-    for (
-      var i = 0;
-      i < lines.length;
-      i++
-    ) {
-      total +=
-        num(
-          lines[i].sizeInch,
-          num(
-            lines[i].size,
-            0
-          )
-        );
-    }
+    var lines = getLines(side);
 
-    return total;
-  }
-
-  // =========================================================
-  // GET ANGLE
-  // =========================================================
-
-  function getSelectedAngle() {
-    var select =
-      $("angle-select");
-
-    if (select) {
-      var value =
-        Number(select.value);
-
-      if (isFinite(value)) {
-        return value;
-      }
-    }
-
-    // -------------------------------------------------------
-    // Alternative IDs
-    // -------------------------------------------------------
-
-    var angleInput =
-      $("angle");
-
-    if (angleInput) {
-      var angle =
-        Number(angleInput.value);
-
-      if (isFinite(angle)) {
-        return angle;
-      }
-    }
-
-    // -------------------------------------------------------
-    // Default
-    // -------------------------------------------------------
-
-    return 90;
-  }
-
-  // =========================================================
-  // GET DIRECTION
-  // =========================================================
-
-  function getSelectedDirection() {
-    var up =
-      $("direction-up");
-
-    var down =
-      $("direction-down");
+    index = parseInt(index, 10);
 
     if (
-      down &&
-      down.classList.contains("active")
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index >= lines.length
     ) {
-      return "DOWN";
+      return;
     }
+
+    var line = lines[index];
+
+    state.activeSide = side;
+    state.editMode = true;
+
+    state.editingLine = {
+      side: side,
+      index: index
+    };
+
+    setSide(side);
+
+    setInputValue(line.size);
+
+    var angleSelect = $("angle-select");
+
+    if (angleSelect) {
+      angleSelect.value = String(line.angle || 90);
+    }
+
+    setDirectionUI(line.direction || "UP");
+
+    var bar = $("edit-bar");
+    var info = $("edit-info");
+
+    if (bar) {
+      bar.style.display = "block";
+    }
+
+    if (info) {
+      info.textContent =
+        "Editing " +
+        (side === "dep" ? "D" : "L") +
+        (index + 1);
+    }
+
+    openSizeCalculator();
+  }
+
+  /* =========================================================
+     DELETE
+     ========================================================= */
+
+  function deleteLine(side, index) {
+    var lines = getLines(side);
+
+    index = parseInt(index, 10);
 
     if (
-      up &&
-      up.classList.contains("active")
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index >= lines.length
     ) {
-      return "UP";
+      return;
     }
 
-    var select =
-      $("direction-select");
+    lines.splice(index, 1);
 
-    if (select) {
-      var value =
-        String(
-          select.value || "UP"
-        ).toUpperCase();
+    setLines(side, lines);
 
-      return value === "DOWN"
-        ? "DOWN"
-        : "UP";
-    }
-
-    return "UP";
-  }
-
-  // =========================================================
-  // EDIT LINE
-  // =========================================================
-
-  function editLine(
-    side,
-    lineId
-  ) {
-    var state =
-      getState();
-
-    var lines =
-      getLines(side);
-
-    var line = null;
-
-    for (
-      var i = 0;
-      i < lines.length;
-      i++
-    ) {
-      if (
-        String(lines[i].id) ===
-        String(lineId)
-      ) {
-        line = lines[i];
-        break;
-      }
-    }
-
-    if (!line) return;
-
-    state.activeSide =
-      side;
-
-    state.editMode =
-      true;
-
-    state.editingLine =
-      line.id;
-
-    setInputValue(
-      String(
-        line.sizeInch ||
-        line.size ||
-        ""
-      )
-    );
-
-    setAngleUI(
-      line.angle ||
-      line.angleDeg ||
-      90
-    );
-
-    setDirectionUI(
-      line.direction ||
-      "UP"
-    );
-
-    updateSideUI();
-
-    var editBar =
-      $("edit-bar");
-
-    if (editBar) {
-      editBar.style.display =
-        "flex";
-    }
+    renumberLines(side);
 
     render();
+    save();
+    redraw();
   }
 
-  // =========================================================
-  // DELETE LINE
-  // =========================================================
+  /* =========================================================
+     MOVE UP
+     ========================================================= */
 
-  function deleteLine(
-    side,
-    lineId
-  ) {
-    var lines =
-      getLines(side);
+  function moveUp(side, index) {
+    var lines = getLines(side);
 
-    var result = [];
-
-    for (
-      var i = 0;
-      i < lines.length;
-      i++
-    ) {
-      if (
-        String(lines[i].id) !==
-        String(lineId)
-      ) {
-        result.push(
-          lines[i]
-        );
-      }
-    }
-
-    renumberLines(
-      result,
-      side
-    );
-
-    setLines(
-      side,
-      result
-    );
-
-    var state =
-      getState();
+    index = parseInt(index, 10);
 
     if (
-      String(
-        state.editingLine
-      ) ===
-      String(lineId)
+      !Number.isInteger(index) ||
+      index <= 0 ||
+      index >= lines.length
     ) {
-      state.editMode =
-        false;
-
-      state.editingLine =
-        null;
+      return;
     }
 
+    var temp = lines[index];
+
+    lines[index] = lines[index - 1];
+    lines[index - 1] = temp;
+
+    setLines(side, lines);
+
+    renumberLines(side);
+
     render();
-
     save();
-
     redraw();
   }
 
-  // =========================================================
-  // MOVE LINE UP
-  // =========================================================
+  /* =========================================================
+     MOVE DOWN
+     ========================================================= */
 
-  function moveUp(
-    side,
-    lineId
-  ) {
-    var lines =
-      getLines(side);
+  function moveDown(side, index) {
+    var lines = getLines(side);
 
-    for (
-      var i = 1;
-      i < lines.length;
-      i++
+    index = parseInt(index, 10);
+
+    if (
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index >= lines.length - 1
     ) {
-      if (
-        String(lines[i].id) ===
-        String(lineId)
-      ) {
-        var temp =
-          lines[i - 1];
-
-        lines[i - 1] =
-          lines[i];
-
-        lines[i] =
-          temp;
-
-        break;
-      }
+      return;
     }
 
-    renumberLines(
-      lines,
-      side
-    );
+    var temp = lines[index];
 
-    setLines(
-      side,
-      lines
-    );
+    lines[index] = lines[index + 1];
+    lines[index + 1] = temp;
 
-    save();
+    setLines(side, lines);
+
+    renumberLines(side);
 
     render();
-
+    save();
     redraw();
   }
 
-  // =========================================================
-  // MOVE LINE DOWN
-  // =========================================================
+  /* =========================================================
+     RENUMBER
+     ========================================================= */
 
-  function moveDown(
-    side,
-    lineId
-  ) {
-    var lines =
-      getLines(side);
+  function renumberLines(side) {
+    var lines = getLines(side);
 
-    for (
-      var i = 0;
-      i < lines.length - 1;
-      i++
-    ) {
-      if (
-        String(lines[i].id) ===
-        String(lineId)
-      ) {
-        var temp =
-          lines[i + 1];
+    var prefix = side === "dep" ? "D" : "L";
 
-        lines[i + 1] =
-          lines[i];
+    lines.forEach(function (line, index) {
+      line.id = prefix + (index + 1);
+      line.index = index;
+    });
 
-        lines[i] =
-          temp;
-
-        break;
-      }
-    }
-
-    renumberLines(
-      lines,
-      side
-    );
-
-    setLines(
-      side,
-      lines
-    );
-
-    save();
-
-    render();
-
-    redraw();
+    setLines(side, lines);
   }
 
-  // =========================================================
-  // RENUMBER
-  // =========================================================
-
-  function renumberLines(
-    lines,
-    side
-  ) {
-    var prefix =
-      side === "dep"
-        ? "D"
-        : "L";
-
-    for (
-      var i = 0;
-      i < lines.length;
-      i++
-    ) {
-      lines[i].id =
-        prefix +
-        (i + 1);
-
-      lines[i].index =
-        i;
-
-      lines[i].sequence =
-        i + 1;
-    }
-  }
-
-  // =========================================================
-  // RENDER LIST
-  // =========================================================
+  /* =========================================================
+     RENDER ALL
+     ========================================================= */
 
   function render() {
     renderList(
@@ -975,822 +790,699 @@
     );
 
     updateTotals();
-
     updateSideUI();
   }
 
-  // =========================================================
-  // RENDER ONE LIST
-  // =========================================================
+  /* =========================================================
+     RENDER LIST
+     ========================================================= */
 
-  function renderList(
-    side,
-    container
-  ) {
+  function renderList(side, container) {
     if (!container) return;
 
-    var lines =
-      getLines(side);
+    var lines = getLines(side);
+
+    container.innerHTML = "";
 
     if (!lines.length) {
-      container.innerHTML =
-        '<div class="empty-lines">' +
-        "No lines" +
-        "</div>";
+      var empty = document.createElement("div");
+
+      empty.className = "empty-lines";
+
+      empty.textContent =
+        side === "dep"
+          ? "No depth lines"
+          : "No length lines";
+
+      container.appendChild(empty);
 
       return;
     }
 
-    var html = "";
+    lines.forEach(function (line, index) {
+      var row = document.createElement("div");
 
-    for (
-      var i = 0;
-      i < lines.length;
-      i++
-    ) {
-      var line =
-        lines[i];
+      row.className = "line-row";
 
-      var id =
-        line.id ||
-        (
-          side === "dep"
-            ? "D"
-            : "L"
-        ) +
-        (i + 1);
+      row.dataset.side = side;
+      row.dataset.index = index;
 
-      var size =
-        num(
-          line.sizeInch,
-          num(
-            line.size,
-            0
-          )
-        );
+      var name = document.createElement("span");
 
-      var angle =
-        num(
-          line.angle,
-          num(
-            line.angleDeg,
-            90
-          )
-        );
+      name.className = "line-name";
 
-      var direction =
-        String(
-          line.direction ||
-          "UP"
-        ).toUpperCase();
+      name.textContent =
+        (side === "dep" ? "D" : "L") +
+        (index + 1);
 
-      html +=
-        '<div class="sheet-line-row">';
+      var size = document.createElement("span");
 
-      html +=
-        '<div class="sheet-line-main">';
+      size.className = "line-size";
 
-      html +=
-        '<strong>' +
-        id +
-        "</strong>";
+      size.textContent =
+        formatSize(line.size) + '"';
 
-      html +=
-        '<span>' +
-        formatSize(size) +
-        "</span>";
+      var angle = document.createElement("span");
 
-      html +=
-        '<span>' +
-        angle +
-        "°" +
-        "</span>";
+      angle.className = "line-angle";
 
-      html +=
-        '<span class="' +
-        (
-          direction === "DOWN"
-            ? "direction-down"
-            : "direction-up"
-        ) +
-        '">' +
-        direction +
-        "</span>";
+      angle.textContent =
+        String(line.angle || 90) + "°";
 
-      html +=
-        "</div>";
+      var direction = document.createElement("span");
 
-      html +=
-        '<div class="sheet-line-actions">';
+      direction.className = "line-direction";
 
-      html +=
-        '<button type="button" ' +
-        'data-sheet-action="edit" ' +
-        'data-sheet-side="' +
-        side +
-        '" ' +
-        'data-sheet-id="' +
-        id +
-        '">' +
-        "EDIT" +
-        "</button>";
+      direction.textContent =
+        line.direction === "DOWN"
+          ? "DOWN"
+          : "UP";
 
-      html +=
-        '<button type="button" ' +
-        'data-sheet-action="up" ' +
-        'data-sheet-side="' +
-        side +
-        '" ' +
-        'data-sheet-id="' +
-        id +
-        '">' +
-        "↑" +
-        "</button>";
+      var edit = document.createElement("button");
 
-      html +=
-        '<button type="button" ' +
-        'data-sheet-action="down" ' +
-        'data-sheet-side="' +
-        side +
-        '" ' +
-        'data-sheet-id="' +
-        id +
-        '">' +
-        "↓" +
-        "</button>";
+      edit.type = "button";
+      edit.className = "line-btn";
+      edit.textContent = "EDIT";
 
-      html +=
-        '<button type="button" ' +
-        'data-sheet-action="delete" ' +
-        'data-sheet-side="' +
-        side +
-        '" ' +
-        'data-sheet-id="' +
-        id +
-        '">' +
-        "✕" +
-        "</button>";
-
-      html +=
-        "</div>";
-
-      html +=
-        "</div>";
-    }
-
-    container.innerHTML =
-      html;
-
-    bindListButtons(
-      container
-    );
-  }
-
-  // =========================================================
-  // LIST BUTTONS
-  // =========================================================
-
-  function bindListButtons(
-    container
-  ) {
-    var buttons =
-      container.querySelectorAll(
-        "[data-sheet-action]"
+      edit.addEventListener(
+        "click",
+        function () {
+          editLine(side, index);
+        }
       );
 
-    for (
-      var i = 0;
-      i < buttons.length;
-      i++
-    ) {
-      buttons[i].onclick =
+      var up = document.createElement("button");
+
+      up.type = "button";
+      up.className = "line-btn";
+      up.textContent = "↑";
+
+      up.addEventListener(
+        "click",
         function () {
-          var action =
-            this.getAttribute(
-              "data-sheet-action"
-            );
+          moveUp(side, index);
+        }
+      );
 
-          var side =
-            this.getAttribute(
-              "data-sheet-side"
-            );
+      var down = document.createElement("button");
 
-          var id =
-            this.getAttribute(
-              "data-sheet-id"
-            );
+      down.type = "button";
+      down.className = "line-btn";
+      down.textContent = "↓";
 
-          if (action === "edit") {
-            editLine(
-              side,
-              id
-            );
-          }
+      down.addEventListener(
+        "click",
+        function () {
+          moveDown(side, index);
+        }
+      );
 
-          if (action === "up") {
-            moveUp(
-              side,
-              id
-            );
-          }
+      var del = document.createElement("button");
 
-          if (action === "down") {
-            moveDown(
-              side,
-              id
-            );
-          }
+      del.type = "button";
+      del.className = "line-btn delete";
+      del.textContent = "✕";
 
-          if (action === "delete") {
-            deleteLine(
-              side,
-              id
-            );
-          }
-        };
-    }
+      del.addEventListener(
+        "click",
+        function () {
+          deleteLine(side, index);
+        }
+      );
+
+      row.appendChild(name);
+      row.appendChild(size);
+      row.appendChild(angle);
+      row.appendChild(direction);
+      row.appendChild(edit);
+      row.appendChild(up);
+      row.appendChild(down);
+      row.appendChild(del);
+
+      container.appendChild(row);
+    });
   }
 
-  // =========================================================
-  // TOTALS
-  // =========================================================
+  /* =========================================================
+     TOTALS
+     ========================================================= */
+
+  function getTotal(side) {
+    var lines = getLines(side);
+
+    return lines.reduce(
+      function (total, line) {
+        return total + num(line.size);
+      },
+      0
+    );
+  }
 
   function updateTotals() {
-    var len =
-      getLines("len");
+    var total = getTotal(getActiveSide());
 
-    var dep =
-      getLines("dep");
+    var totalEl = $("total-value");
 
-    var lenTotal =
-      getPreviousTotal(len);
-
-    var depTotal =
-      getPreviousTotal(dep);
-
-    var total =
-      lenTotal +
-      depTotal;
-
-    setText(
-      "total-value",
-      formatSize(total)
-    );
-
-    setText(
-      "sum-len",
-      formatSize(lenTotal)
-    );
-
-    setText(
-      "sum-dep",
-      formatSize(depTotal)
-    );
-
-    setText(
-      "sum-len-lines",
-      len.length
-    );
-
-    setText(
-      "sum-dep-lines",
-      dep.length
-    );
-  }
-
-  function setText(
-    id,
-    value
-  ) {
-    var el =
-      $(id);
-
-    if (!el) return;
-
-    if (
-      el.tagName === "INPUT" ||
-      el.tagName === "TEXTAREA"
-    ) {
-      el.value =
-        value;
-    } else {
-      el.textContent =
-        value;
+    if (totalEl) {
+      totalEl.textContent =
+        formatSize(total) + '"';
     }
   }
 
-  // =========================================================
-  // ANGLE UI
-  // =========================================================
-
-  function setAngleUI(
-    angle
-  ) {
-    var select =
-      $("angle-select");
-
-    if (select) {
-      select.value =
-        String(angle);
-    }
-
-    var input =
-      $("angle");
-
-    if (input) {
-      input.value =
-        angle;
-    }
-  }
-
-  // =========================================================
-  // DIRECTION UI
-  // =========================================================
-
-  function setDirectionUI(
-    direction
-  ) {
-    direction =
-      String(
-        direction ||
-        "UP"
-      ).toUpperCase();
-
-    var up =
-      $("direction-up");
-
-    var down =
-      $("direction-down");
-
-    if (up) {
-      up.classList.toggle(
-        "active",
-        direction === "UP"
-      );
-    }
-
-    if (down) {
-      down.classList.toggle(
-        "active",
-        direction === "DOWN"
-      );
-    }
-
-    var select =
-      $("direction-select");
-
-    if (select) {
-      select.value =
-        direction;
-    }
-  }
-
-  // =========================================================
-  // SAVE
-  // =========================================================
+  /* =========================================================
+     SAVE
+     ========================================================= */
 
   function save() {
+    var state = getState();
+
     try {
       if (
-        window.Storage &&
-        typeof window.Storage.save ===
-          "function"
-      ) {
-        window.Storage.save();
-        return;
-      }
-
-      if (
         window.Core &&
-        typeof window.Core.save ===
-          "function"
+        typeof Core.saveData === "function"
       ) {
-        window.Core.save();
-        return;
+        Core.saveData(state);
+      } else {
+        localStorage.setItem(
+          "sheetMarking_v7",
+          JSON.stringify(state)
+        );
       }
 
-      var state =
-        getState();
+      var status = $("saveStatus");
 
-      localStorage.setItem(
-        "sheetMarking_v7",
-        JSON.stringify(state)
-      );
+      if (status) {
+        status.textContent = "Saved";
+      }
     } catch (err) {
-      console.error(
-        "❌ Sheet save error:",
-        err
-      );
-
-      if (window.Bugs) {
-        try {
-          window.Bugs.log(
-            "sheet.save",
-            err.message,
-            err.stack
-          );
-        } catch (bugErr) {}
+      if (
+        window.Bugs &&
+        typeof Bugs.log === "function"
+      ) {
+        Bugs.log(
+          "Sheet save failed",
+          err
+        );
       }
     }
   }
 
-  // =========================================================
-  // REDRAW ALL
-  // =========================================================
+  /* =========================================================
+     REDRAW
+     ========================================================= */
 
   function redraw() {
     try {
       if (
         window.Flat &&
-        typeof window.Flat.draw ===
-          "function"
+        typeof Flat.render === "function"
       ) {
-        window.Flat.draw();
+        Flat.render();
+      } else if (
+        window.FlatView &&
+        typeof FlatView.render === "function"
+      ) {
+        FlatView.render();
       }
     } catch (err) {
-      console.error(
-        "Flat redraw error:",
-        err
-      );
+      if (
+        window.Bugs &&
+        typeof Bugs.log === "function"
+      ) {
+        Bugs.log(
+          "Flat redraw failed",
+          err
+        );
+      }
     }
 
     try {
       if (
         window.ThreeD &&
-        typeof window.ThreeD.draw ===
-          "function"
+        typeof ThreeD.render === "function"
       ) {
-        window.ThreeD.draw();
+        ThreeD.render();
       }
     } catch (err) {
-      console.error(
-        "3D redraw error:",
-        err
-      );
+      if (
+        window.Bugs &&
+        typeof Bugs.log === "function"
+      ) {
+        Bugs.log(
+          "3D redraw failed",
+          err
+        );
+      }
     }
 
     try {
       if (
         window.Result &&
-        typeof window.Result.render ===
-          "function"
+        typeof Result.render === "function"
       ) {
-        window.Result.render();
+        Result.render();
       }
     } catch (err) {
+      if (
+        window.Bugs &&
+        typeof Bugs.log === "function"
+      ) {
+        Bugs.log(
+          "Result redraw failed",
+          err
+        );
+      }
+    }
+  }
+
+  /* =========================================================
+     MESSAGE
+     ========================================================= */
+
+  function showMessage(message, isError) {
+    var el = $("input-error");
+
+    if (!el) return;
+
+    el.textContent = message || "";
+
+    el.style.display =
+      message ? "block" : "none";
+
+    if (isError) {
+      el.classList.add("error");
+    } else {
+      el.classList.remove("error");
+    }
+  }
+
+  /* =========================================================
+     CANCEL EDIT
+     ========================================================= */
+
+  function cancelEdit() {
+    var state = getState();
+
+    state.editMode = false;
+    state.editingLine = null;
+
+    clearInput();
+
+    var bar = $("edit-bar");
+
+    if (bar) {
+      bar.style.display = "none";
+    }
+
+    render();
+    closeSizeCalculator();
+  }
+
+  /* =========================================================
+     BUTTON BINDING
+     ========================================================= */
+
+  function bindButtons() {
+
+    /* -----------------------------------------
+       SIDE BUTTONS
+       ----------------------------------------- */
+
+    var sideLen = $("side-len");
+
+    if (sideLen) {
+      sideLen.addEventListener(
+        "click",
+        function () {
+          setSide("len");
+        }
+      );
+    }
+
+    var sideDep = $("side-dep");
+
+    if (sideDep) {
+      sideDep.addEventListener(
+        "click",
+        function () {
+          setSide("dep");
+        }
+      );
+    }
+
+    /* -----------------------------------------
+       CURRENT SIZE DISPLAY
+       TAP = OPEN CALCULATOR
+       ----------------------------------------- */
+
+    var display = $("display");
+
+    if (display) {
+
+      display.addEventListener(
+        "click",
+        function () {
+          openSizeCalculator();
+        }
+      );
+
+      display.addEventListener(
+        "focus",
+        function () {
+          openSizeCalculator();
+        }
+      );
+
+      display.addEventListener(
+        "touchstart",
+        function () {
+          openSizeCalculator();
+        },
+        {
+          passive: true
+        }
+      );
+    }
+
+    /* -----------------------------------------
+       ADD
+       ----------------------------------------- */
+
+    var add = $("btn-add");
+
+    if (add) {
+      add.addEventListener(
+        "click",
+        function () {
+          addLine();
+        }
+      );
+    }
+
+    /* -----------------------------------------
+       OK
+       ----------------------------------------- */
+
+    var ok = $("btn-ok");
+
+    if (ok) {
+      ok.addEventListener(
+        "click",
+        function () {
+          addLine();
+        }
+      );
+    }
+
+    /* -----------------------------------------
+       CLEAR
+       ----------------------------------------- */
+
+    var clear = $("btn-clear");
+
+    if (clear) {
+      clear.addEventListener(
+        "click",
+        function () {
+          clearCalculator();
+        }
+      );
+    }
+
+    /* -----------------------------------------
+       EDIT CANCEL
+       ----------------------------------------- */
+
+    var cancelEditBtn =
+      $("btn-cancel-edit");
+
+    if (cancelEditBtn) {
+      cancelEditBtn.addEventListener(
+        "click",
+        function () {
+          cancelEdit();
+        }
+      );
+    }
+
+    /* -----------------------------------------
+       EDIT SAVE
+       ----------------------------------------- */
+
+    var saveEdit =
+      $("btn-save-edit");
+
+    if (saveEdit) {
+      saveEdit.addEventListener(
+        "click",
+        function () {
+          addLine();
+        }
+      );
+    }
+
+    /* -----------------------------------------
+       DIGITS
+       ----------------------------------------- */
+
+    document
+      .querySelectorAll("[data-digit]")
+      .forEach(function (btn) {
+
+        btn.addEventListener(
+          "click",
+          function () {
+            openSizeCalculator();
+
+            appendValue(
+              btn.getAttribute(
+                "data-digit"
+              )
+            );
+          }
+        );
+
+      });
+
+    /* -----------------------------------------
+       FRACTIONS
+       ----------------------------------------- */
+
+    document
+      .querySelectorAll("[data-fraction]")
+      .forEach(function (btn) {
+
+        btn.addEventListener(
+          "click",
+          function () {
+            openSizeCalculator();
+
+            appendFraction(
+              btn.getAttribute(
+                "data-fraction"
+              )
+            );
+          }
+        );
+
+      });
+
+    /* -----------------------------------------
+       BACKSPACE
+       ----------------------------------------- */
+
+    var backspaceBtn =
+      $("btn-backspace");
+
+    if (backspaceBtn) {
+      backspaceBtn.addEventListener(
+        "click",
+        function () {
+          backspace();
+        }
+      );
+    }
+
+    /* -----------------------------------------
+       DECIMAL
+       ----------------------------------------- */
+
+    var decimalBtn =
+      $("btn-decimal");
+
+    if (decimalBtn) {
+      decimalBtn.addEventListener(
+        "click",
+        function () {
+          appendDecimal();
+        }
+      );
+    }
+
+    /* -----------------------------------------
+       DIRECTION
+       ----------------------------------------- */
+
+    var directionUp =
+      $("direction-up");
+
+    var directionDown =
+      $("direction-down");
+
+    if (directionUp) {
+      directionUp.addEventListener(
+        "click",
+        function () {
+          setDirectionUI("UP");
+        }
+      );
+    }
+
+    if (directionDown) {
+      directionDown.addEventListener(
+        "click",
+        function () {
+          setDirectionUI("DOWN");
+        }
+      );
+    }
+
+    /* -----------------------------------------
+       ANGLE
+       ----------------------------------------- */
+
+    var angleSelect =
+      $("angle-select");
+
+    if (angleSelect) {
+      angleSelect.addEventListener(
+        "change",
+        function () {
+          var value =
+            parseFloat(angleSelect.value);
+
+          if (!Number.isFinite(value)) {
+            value = 90;
+          }
+
+          angleSelect.value =
+            String(value);
+        }
+      );
+    }
+  }
+
+  /* =========================================================
+     KEYBOARD
+     ========================================================= */
+
+  function bindKeyboard() {
+    document.addEventListener(
+      "keydown",
+      function (event) {
+
+        /*
+          Ignore keyboard when typing in
+          normal input fields.
+        */
+
+        var target = event.target;
+
+        if (
+          target &&
+          (
+            target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.tagName === "SELECT"
+          ) &&
+          target.id !== "display"
+        ) {
+          return;
+        }
+
+        if (/^\d$/.test(event.key)) {
+          openSizeCalculator();
+          appendValue(event.key);
+          event.preventDefault();
+          return;
+        }
+
+        if (event.key === ".") {
+          appendDecimal();
+          event.preventDefault();
+          return;
+        }
+
+        if (
+          event.key === "Backspace"
+        ) {
+          backspace();
+          event.preventDefault();
+          return;
+        }
+
+        if (
+          event.key === "Enter"
+        ) {
+          addLine();
+          event.preventDefault();
+          return;
+        }
+
+        if (
+          event.key === "Escape"
+        ) {
+          clearCalculator();
+          event.preventDefault();
+        }
+      }
+    );
+  }
+
+  /* =========================================================
+     INIT
+     ========================================================= */
+
+  function init() {
+    try {
+      bindButtons();
+      bindKeyboard();
+
+      updateSideUI();
+      render();
+
+      /*
+        Calculator initially open.
+        Isse user ko directly size entry dikhegi.
+      */
+
+      openSizeCalculator();
+
+    } catch (err) {
+
+      if (
+        window.Bugs &&
+        typeof Bugs.log === "function"
+      ) {
+        Bugs.log(
+          "Sheet init failed",
+          err
+        );
+      }
+
       console.error(
-        "Result redraw error:",
+        "Sheet init failed:",
         err
       );
     }
   }
 
-  // =========================================================
-  // MESSAGE
-  // =========================================================
-
-  function showMessage(
-    message
-  ) {
-    console.warn(
-      message
-    );
-
-    var error =
-      $("input-error");
-
-    if (error) {
-      error.textContent =
-        message;
-
-      error.style.display =
-        "block";
-
-      setTimeout(
-        function () {
-          error.style.display =
-            "none";
-        },
-        1800
-      );
-    }
-  }
-
-  // =========================================================
-  // CANCEL EDIT
-  // =========================================================
-
-  function cancelEdit() {
-    var state =
-      getState();
-
-    state.editMode =
-      false;
-
-    state.editingLine =
-      null;
-
-    clearInput();
-
-    var editBar =
-      $("edit-bar");
-
-    if (editBar) {
-      editBar.style.display =
-        "none";
-    }
-
-    render();
-  }
-
-  // =========================================================
-  // BUTTON BINDING
-  // =========================================================
-
-  function bindButtons() {
-    // -------------------------------------------------------
-    // SIDE
-    // -------------------------------------------------------
-
-    var lenButton =
-      $("side-len");
-
-    if (lenButton) {
-      lenButton.onclick =
-        function () {
-          setSide("len");
-        };
-    }
-
-    var depButton =
-      $("side-dep");
-
-    if (depButton) {
-      depButton.onclick =
-        function () {
-          setSide("dep");
-        };
-    }
-
-    // -------------------------------------------------------
-    // ADD
-    // -------------------------------------------------------
-
-    var add =
-      $("btn-add");
-
-    if (add) {
-      add.onclick =
-        addLine;
-    }
-
-    // -------------------------------------------------------
-    // OK
-    // -------------------------------------------------------
-
-    var ok =
-      $("btn-ok");
-
-    if (ok) {
-      ok.onclick =
-        addLine;
-    }
-
-    // -------------------------------------------------------
-    // CLEAR
-    // -------------------------------------------------------
-
-    var clear =
-      $("btn-clear");
-
-    if (clear) {
-      clear.onclick =
-        clearAllInput;
-    }
-
-    // -------------------------------------------------------
-    // EDIT CANCEL
-    // -------------------------------------------------------
-
-    var cancel =
-      $("btn-cancel-edit");
-
-    if (cancel) {
-      cancel.onclick =
-        cancelEdit;
-    }
-
-    // -------------------------------------------------------
-    // DIGIT BUTTONS
-    // -------------------------------------------------------
-
-    var digits =
-      document.querySelectorAll(
-        "[data-digit]"
-      );
-
-    for (
-      var i = 0;
-      i < digits.length;
-      i++
-    ) {
-      digits[i].onclick =
-        function () {
-          appendValue(
-            this.getAttribute(
-              "data-digit"
-            )
-          );
-        };
-    }
-
-    // -------------------------------------------------------
-    // FRACTIONS
-    // -------------------------------------------------------
-
-    var fractions =
-      document.querySelectorAll(
-        "[data-fraction]"
-      );
-
-    for (
-      var j = 0;
-      j < fractions.length;
-      j++
-    ) {
-      fractions[j].onclick =
-        function () {
-          appendFraction(
-            this.getAttribute(
-              "data-fraction"
-            )
-          );
-        };
-    }
-
-    // -------------------------------------------------------
-    // BACKSPACE
-    // -------------------------------------------------------
-
-    var back =
-      $("btn-backspace");
-
-    if (back) {
-      back.onclick =
-        backspace;
-    }
-
-    // -------------------------------------------------------
-    // DECIMAL
-    // -------------------------------------------------------
-
-    var decimal =
-      $("btn-decimal");
-
-    if (decimal) {
-      decimal.onclick =
-        function () {
-          appendValue(".");
-        };
-    }
-
-    // -------------------------------------------------------
-    // DIRECTION
-    // -------------------------------------------------------
-
-    var up =
-      $("direction-up");
-
-    if (up) {
-      up.onclick =
-        function () {
-          setDirectionUI(
-            "UP"
-          );
-        };
-    }
-
-    var down =
-      $("direction-down");
-
-    if (down) {
-      down.onclick =
-        function () {
-          setDirectionUI(
-            "DOWN"
-          );
-        };
-    }
-
-    // -------------------------------------------------------
-    // ANGLE
-    // -------------------------------------------------------
-
-    var angle =
-      $("angle-select");
-
-    if (angle) {
-      angle.onchange =
-        function () {
-          setAngleUI(
-            this.value
-          );
-        };
-    }
-  }
-
-  // =========================================================
-  // KEYBOARD
-  // =========================================================
-
-  function bindKeyboard() {
-    document.addEventListener(
-      "keydown",
-      function (e) {
-        // Don't interfere with text fields.
-        var tag =
-          e.target &&
-          e.target.tagName
-            ? e.target.tagName
-            : "";
-
-        if (
-          tag === "INPUT" &&
-          e.target.id !== "display"
-        ) {
-          return;
-        }
-
-        if (
-          /^[0-9]$/.test(e.key)
-        ) {
-          appendValue(
-            e.key
-          );
-
-          e.preventDefault();
-
-          return;
-        }
-
-        if (e.key === ".") {
-          appendValue(".");
-
-          e.preventDefault();
-
-          return;
-        }
-
-        if (
-          e.key === "Backspace"
-        ) {
-          backspace();
-
-          e.preventDefault();
-
-          return;
-        }
-
-        if (
-          e.key === "Enter"
-        ) {
-          addLine();
-
-          e.preventDefault();
-
-          return;
-        }
-
-        if (
-          e.key === "Escape"
-        ) {
-          cancelEdit();
-
-          e.preventDefault();
-        }
-      }
-    );
-  }
-
-  // =========================================================
-  // INIT
-  // =========================================================
-
-  function init() {
-    bindButtons();
-
-    bindKeyboard();
-
-    updateSideUI();
-
-    render();
-  }
-
-  // =========================================================
-  // EXPOSE
-  // =========================================================
+  /* =========================================================
+     PUBLIC API
+     ========================================================= */
 
   window.Sheet = {
+
     init: init,
 
     render: render,
@@ -1813,9 +1505,21 @@
 
     backspace: backspace,
 
-    clear: clearAllInput,
+    clear: clearCalculator,
 
-    cancelEdit: cancelEdit
+    cancelEdit: cancelEdit,
+
+    openSizeCalculator:
+      openSizeCalculator,
+
+    closeSizeCalculator:
+      closeSizeCalculator,
+
+    getTotal: getTotal,
+
+    getInputValue: getInputValue,
+
+    setInputValue: setInputValue
   };
 
 })();
