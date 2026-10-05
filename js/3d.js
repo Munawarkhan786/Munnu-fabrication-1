@@ -1,11 +1,11 @@
 /* =========================================================
-   3D VIEW — MASTER GEOMETRY V5 (FULL FINAL)
-   Sheet Metal Complete 3D + Reverse/Flat View
-
-   FIX V5:
-   - GeometryEngine.analyze() ko state pass kiya
-   - Ab Settings + Lines dono calculation mein use honge
-   - Poora code — kuch missing nahi
+   3D VIEW — MASTER GEOMETRY V6 (FULL 3D BOX)
+   ---------------------------------------------------------
+   FIX V6:
+   - GeometryEngine.threeD.records use karta hai
+   - Ab poora 3D box banata hai (Length + Depth dono)
+   - Har leg ke liye sheet strip + bend joints
+   - Cup cuts bhi draw karta hai
    ========================================================= */
 
 (function () {
@@ -141,10 +141,7 @@
       window.view3d.rotY += dx * 0.5;
       window.view3d.rotX += dy * 0.5;
 
-      window.view3d.rotX = Math.max(
-        -90,
-        Math.min(90, window.view3d.rotX)
-      );
+      window.view3d.rotX = Math.max(-90, Math.min(90, window.view3d.rotX));
 
       lastX = e.clientX;
       lastY = e.clientY;
@@ -183,10 +180,7 @@
         window.view3d.rotY += dx * 0.5;
         window.view3d.rotX += dy * 0.5;
 
-        window.view3d.rotX = Math.max(
-          -90,
-          Math.min(90, window.view3d.rotX)
-        );
+        window.view3d.rotX = Math.max(-90, Math.min(90, window.view3d.rotX));
 
         lastX = e.touches[0].clientX;
         lastY = e.touches[0].clientY;
@@ -206,10 +200,7 @@
         var factor = e.deltaY > 0 ? 1.12 : 0.88;
         window.view3d.dist *= factor;
 
-        window.view3d.dist = Math.max(
-          100,
-          Math.min(5000, window.view3d.dist)
-        );
+        window.view3d.dist = Math.max(100, Math.min(5000, window.view3d.dist));
       },
       { passive: false }
     );
@@ -234,7 +225,7 @@
   }
 
   /* =========================================================
-     MASTER DATA — FIX
+     MASTER DATA
      ========================================================= */
 
   function getMasterData() {
@@ -275,98 +266,69 @@
   }
 
   /* =========================================================
-     COMPLETE BENT SHEET
+     COMPLETE BENT SHEET — FULL 3D BOX
      ========================================================= */
 
   function buildCompleteView(data) {
-    var lines = [];
 
-    if (Array.isArray(data.lengthLines)) {
-      lines = lines.concat(data.lengthLines);
+    var records = [];
+
+    if (
+      data.threeD &&
+      Array.isArray(data.threeD.records) &&
+      data.threeD.records.length > 0
+    ) {
+      records = data.threeD.records;
     }
 
-    if (Array.isArray(data.depthLines)) {
-      lines = lines.concat(data.depthLines);
-    }
-
-    if (lines.length === 0 && data.threeD) {
-      if (Array.isArray(data.threeD.length)) {
-        lines = lines.concat(data.threeD.length);
-      }
-      if (Array.isArray(data.threeD.depth)) {
-        lines = lines.concat(data.threeD.depth);
-      }
-    }
-
-    if (lines.length === 0) {
+    if (records.length === 0) {
       addEmptyMessage();
       return;
     }
 
-    var points = [];
-    var cursor = new THREE.Vector3(0, 0, 0);
-    var direction = new THREE.Vector3(1, 0, 0);
-    var up = new THREE.Vector3(0, 1, 0);
-    var normal = new THREE.Vector3(0, 0, 1);
+    // -----------------------------------------------------
+    // SAARE POINTS COLLECT KARO (CENTERING KE LIYE)
+    // -----------------------------------------------------
 
-    points.push(cursor.clone());
+    var allPoints = [];
 
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-
-      var size = num(
-        line.sizeInch,
-        num(line.size, 0)
-      );
-
-      if (size <= 0) continue;
-
-      var next = cursor.clone().add(
-        direction.clone().multiplyScalar(size * SCALE)
-      );
-
-      points.push(next.clone());
-
-      var angle = num(
-        line.effectiveAngleDeg,
-        num(line.effectiveAngle, 0)
-      );
-
-      if (!angle && line.angle !== undefined) {
-        angle = num(line.angle, 0);
+    records.forEach(function (rec) {
+      if (rec.start) {
+        allPoints.push(new THREE.Vector3(
+          rec.start.x * SCALE,
+          rec.start.y * SCALE,
+          rec.start.z * SCALE
+        ));
       }
-
-      if (angle !== 0) {
-        var bendDirection = String(
-          line.direction || "UP"
-        ).toUpperCase();
-
-        var sign = bendDirection === "DOWN" ? -1 : 1;
-        var axis = up.clone();
-
-        direction.applyAxisAngle(axis, degToRad(angle) * sign);
-        direction.normalize();
-
-        normal.applyAxisAngle(axis, degToRad(angle) * sign);
-        normal.normalize();
+      if (rec.end) {
+        allPoints.push(new THREE.Vector3(
+          rec.end.x * SCALE,
+          rec.end.y * SCALE,
+          rec.end.z * SCALE
+        ));
       }
+    });
 
-      cursor = next;
+    if (allPoints.length === 0) {
+      addEmptyMessage();
+      return;
     }
 
-    centerPoints(points);
-    buildBentSheet(points, data);
-    buildBendMarkers(points, lines);
-    build3DCuts(data);
-    buildReferenceGrid(points);
-  }
+    // -----------------------------------------------------
+    // CENTER CALCULATE KARO
+    // -----------------------------------------------------
 
-  /* =========================================================
-     BENT SHEET
-     ========================================================= */
+    var box = new THREE.Box3();
+    allPoints.forEach(function (p) {
+      box.expandByPoint(p);
+    });
 
-  function buildBentSheet(points, data) {
-    if (points.length < 2) return;
+    var center = new THREE.Vector3();
+    box.getCenter(center);
+
+    // -----------------------------------------------------
+    // THICKNESS
+    // -----------------------------------------------------
 
     var thicknessMM = num(
       data.settings && data.settings.thickness,
@@ -374,95 +336,85 @@
     );
 
     var thicknessIn = thicknessMM / 25.4;
-    var thickness = Math.max(thicknessIn * SCALE, 1);
+    var thickness = Math.max(thicknessIn * SCALE, 2);
 
-    var material = new THREE.MeshStandardMaterial({
-      color: 0xbfc5ca,
-      metalness: 0.8,
-      roughness: 0.28,
+    // -----------------------------------------------------
+    // SHEET MATERIAL
+    // -----------------------------------------------------
+
+    var sheetMaterial = new THREE.MeshStandardMaterial({
+      color: 0xc0c6cc,
+      metalness: 0.85,
+      roughness: 0.25,
       side: THREE.DoubleSide
     });
 
-    for (var i = 0; i < points.length - 1; i++) {
-      var a = points[i];
-      var b = points[i + 1];
+    // -----------------------------------------------------
+    // HAR RECORD KE LIYE 3D SHEET STRIP BANAO
+    // -----------------------------------------------------
 
-      var length = a.distanceTo(b);
-      if (length <= 0) continue;
+    records.forEach(function (rec) {
 
-      var midpoint = a.clone().add(b).multiplyScalar(0.5);
+      if (!rec.start || !rec.end) return;
+
+      var start = new THREE.Vector3(
+        rec.start.x * SCALE - center.x,
+        rec.start.y * SCALE - center.y,
+        rec.start.z * SCALE - center.z
+      );
+
+      var end = new THREE.Vector3(
+        rec.end.x * SCALE - center.x,
+        rec.end.y * SCALE - center.y,
+        rec.end.z * SCALE - center.z
+      );
+
+      var length = start.distanceTo(end);
+
+      if (length <= 0) return;
+
+      var sheetWidth = 200;
+      if (rec.side === "length") {
+        sheetWidth = 250;
+      } else {
+        sheetWidth = 150;
+      }
+
+      var midpoint = start.clone().add(end).multiplyScalar(0.5);
 
       var geometry = new THREE.BoxGeometry(
         length,
-        thickness,
+        sheetWidth,
         thickness
       );
 
-      var mesh = new THREE.Mesh(geometry, material.clone());
-      mesh.position.copy(midpoint);
-      mesh.lookAt(b);
-      meshGroup.add(mesh);
-    }
-  }
-
-  /* =========================================================
-     BEND MARKERS
-     ========================================================= */
-
-  function buildBendMarkers(points, lines) {
-    if (points.length < 3) return;
-
-    for (var i = 1; i < points.length - 1; i++) {
-      var point = points[i];
-
-      var geometry = new THREE.TorusGeometry(4, 1.2, 8, 16);
-
-      var material = new THREE.MeshBasicMaterial({
-        color: 0xff3333,
-        wireframe: !!window.view3d.wireframe
-      });
-
-      var marker = new THREE.Mesh(geometry, material);
-      marker.position.copy(point);
-      meshGroup.add(marker);
-
-      var lineData = lines[i - 1];
-      if (!lineData) continue;
-
-      var angle = num(
-        lineData.effectiveAngleDeg,
-        num(lineData.angle, 0)
+      var mesh = new THREE.Mesh(
+        geometry,
+        sheetMaterial.clone()
       );
 
-      if (!angle) continue;
-      addAngleMarker(point, angle);
-    }
-  }
+      mesh.position.copy(midpoint);
+      mesh.lookAt(end);
 
-  function addAngleMarker(position, angle) {
-    var length = 12;
+      meshGroup.add(mesh);
 
-    var pts = [
-      new THREE.Vector3(
-        position.x - length,
-        position.y,
-        position.z
-      ),
-      new THREE.Vector3(
-        position.x + length,
-        position.y,
-        position.z
-      )
-    ];
+      // Bend joint
+      var jointGeo = new THREE.SphereGeometry(thickness * 10, 8, 8);
+      var jointMat = new THREE.MeshBasicMaterial({ color: 0xff3333 });
 
-    var geometry = new THREE.BufferGeometry().setFromPoints(pts);
+      var joint = new THREE.Mesh(jointGeo, jointMat);
+      joint.position.copy(end);
+      meshGroup.add(joint);
 
-    var material = new THREE.LineBasicMaterial({
-      color: 0xffb020
+      // Center line
+      var lineGeo = new THREE.BufferGeometry().setFromPoints([start, end]);
+      var lineMat = new THREE.LineBasicMaterial({ color: 0x4a90e2 });
+      var centerLine = new THREE.Line(lineGeo, lineMat);
+      meshGroup.add(centerLine);
     });
 
-    var line = new THREE.Line(geometry, material);
-    meshGroup.add(line);
+    build3DCuts(data);
+    buildReferenceGridCentered(box);
   }
 
   /* =========================================================
@@ -482,15 +434,8 @@
       var y = num(pos.y, 0) * SCALE;
       var z = 2;
 
-      var width = num(
-        cut.widthIn,
-        num(cut.width, 0.1)
-      ) * SCALE;
-
-      var depth = num(
-        cut.depthIn,
-        num(cut.depth, width / SCALE)
-      ) * SCALE;
+      var width = num(cut.widthIn, num(cut.width, 0.1)) * SCALE;
+      var depth = num(cut.depthIn, num(cut.depth, width / SCALE)) * SCALE;
 
       width = Math.max(width, 3);
       depth = Math.max(depth, 3);
@@ -545,46 +490,29 @@
 
     var sheetMesh = new THREE.Mesh(geometry, material);
     sheetMesh.position.set(width / 2, height / 2, 0);
-
     meshGroup.add(sheetMesh);
 
-    var lengthLines = Array.isArray(data.lengthLines)
-      ? data.lengthLines
-      : [];
+    var lengthLines = Array.isArray(data.lengthLines) ? data.lengthLines : [];
 
     lengthLines.forEach(function (line) {
       var pos = num(line.positionInch, num(line.position, 0));
-
       if (pos < 0 || pos > width / SCALE) return;
-
       var x = pos * SCALE;
       addFlatLine(x, 0, x, height, 0x2563eb);
     });
 
-    var depthLines = Array.isArray(data.depthLines)
-      ? data.depthLines
-      : [];
+    var depthLines = Array.isArray(data.depthLines) ? data.depthLines : [];
 
     depthLines.forEach(function (line) {
       var pos = num(line.positionInch, num(line.position, 0));
-
       if (pos < 0 || pos > height / SCALE) return;
-
       var y = pos * SCALE;
       addFlatLine(0, y, width, y, 0x2563eb);
     });
 
     buildFlatCuts(data);
-
-    sheetMesh.position.x = width / 2;
-    sheetMesh.position.y = height / 2;
-
     addRectangleOutline(width, height);
   }
-
-  /* =========================================================
-     FLAT LINE
-     ========================================================= */
 
   function addFlatLine(x1, y1, x2, y2, color) {
     var geometry = new THREE.BufferGeometry().setFromPoints([
@@ -597,41 +525,23 @@
     meshGroup.add(line);
   }
 
-  /* =========================================================
-     FLAT CUTS
-     ========================================================= */
-
   function buildFlatCuts(data) {
     var cuts = Array.isArray(data.cuts) ? data.cuts : [];
 
     cuts.forEach(function (cut) {
       var pos = cut.position || {};
-
       var x = num(pos.x, 0) * SCALE;
       var y = num(pos.y, 0) * SCALE;
-
       var w = num(cut.widthIn, num(cut.width, 0.1)) * SCALE;
       var h = num(cut.depthIn, num(cut.depth, 0.1)) * SCALE;
 
-      var geometry = new THREE.BoxGeometry(
-        Math.max(w, 4),
-        Math.max(h, 4),
-        5
-      );
-
-      var material = new THREE.MeshBasicMaterial({
-        color: 0xff0000
-      });
-
+      var geometry = new THREE.BoxGeometry(Math.max(w, 4), Math.max(h, 4), 5);
+      var material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
       var mesh = new THREE.Mesh(geometry, material);
       mesh.position.set(x, y, 5);
       meshGroup.add(mesh);
     });
   }
-
-  /* =========================================================
-     SHEET OUTLINE
-     ========================================================= */
 
   function addRectangleOutline(width, height) {
     var pts = [
@@ -643,11 +553,7 @@
     ];
 
     var geometry = new THREE.BufferGeometry().setFromPoints(pts);
-
-    var material = new THREE.LineBasicMaterial({
-      color: 0xffffff
-    });
-
+    var material = new THREE.LineBasicMaterial({ color: 0xffffff });
     var line = new THREE.Line(geometry, material);
     meshGroup.add(line);
   }
@@ -656,43 +562,18 @@
      REFERENCE GRID
      ========================================================= */
 
-  function buildReferenceGrid(points) {
-    if (!points || points.length < 2) return;
+  function buildReferenceGridCentered(box) {
+    if (!box) return;
 
-    var size = 500;
+    var size = box.getSize(new THREE.Vector3());
+    var maxSize = Math.max(size.x, size.y, size.z) * 2;
 
-    var grid = new THREE.GridHelper(
-      size,
-      20,
-      0x333333,
-      0x1c1c1c
-    );
+    if (maxSize <= 0) maxSize = 500;
 
+    var grid = new THREE.GridHelper(maxSize, 20, 0x333333, 0x1c1c1c);
     grid.rotation.x = Math.PI / 2;
-    grid.position.z = -5;
-
+    grid.position.y = -size.y / 2 - 20;
     meshGroup.add(grid);
-  }
-
-  /* =========================================================
-     CENTER MODEL
-     ========================================================= */
-
-  function centerPoints(points) {
-    if (!points || points.length === 0) return;
-
-    var box = new THREE.Box3();
-
-    points.forEach(function (p) {
-      box.expandByPoint(p);
-    });
-
-    var center = new THREE.Vector3();
-    box.getCenter(center);
-
-    points.forEach(function (p) {
-      p.sub(center);
-    });
   }
 
   /* =========================================================
@@ -701,12 +582,10 @@
 
   function addEmptyMessage() {
     var geometry = new THREE.BoxGeometry(1, 1, 1);
-
     var material = new THREE.MeshBasicMaterial({
       color: 0x444444,
       wireframe: true
     });
-
     var mesh = new THREE.Mesh(geometry, material);
     meshGroup.add(mesh);
   }
@@ -738,7 +617,6 @@
 
   function animate() {
     requestAnimationFrame(animate);
-
     if (!renderer) return;
 
     if (window.view3d && window.view3d.autoRotate) {
@@ -757,7 +635,6 @@
     if (viewName !== "complete" && viewName !== "reverse") {
       viewName = "complete";
     }
-
     currentView = viewName;
     draw();
   }
@@ -788,7 +665,6 @@
     window.view3d.rotX = -25;
     window.view3d.rotY = 35;
     window.view3d.dist = 900;
-
     window.view3d.autoRotate = false;
     window.view3d.wireframe = false;
 
