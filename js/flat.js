@@ -1,39 +1,22 @@
 /* =========================================================
-   FLAT.JS
-   FLAT VIEW — MASTER GEOMETRY V7
+   FLAT.JS — 2D MASTER FLAT VIEW V8
    ---------------------------------------------------------
-   IMPORTANT:
-   Flat does NOT calculate engineering.
+   GeometryEngine = calculation source
+   Flat.js        = display only
 
-   GeometryEngine = BRAIN
-   Flat = 2D EYES
-
-   FLOW:
-   GeometryEngine.analyze()
-        ↓
-   master sheet
-        ↓
-   bend positions
-        ↓
-   intersections
-        ↓
-   cup cuts
-        ↓
-   canvas drawing
+   FIX:
+   - drawCuts() is now defined
+   - No ReferenceError from draw()
+   - Uses GeometryEngine.analyze()
+   - Draws sheet outline
+   - Draws bend/mark lines
+   - Draws cup cuts
+   - Cut replaces bend line where possible
+   - Supports zoom / pan / reset
    ========================================================= */
 
 (function () {
-
   "use strict";
-
-  var canvas = null;
-  var ctx = null;
-  var container = null;
-
-  var masterData = null;
-
-  var resizeTimer = null;
-
 
   /* =========================================================
      HELPERS
@@ -43,211 +26,1086 @@
     return document.getElementById(id);
   }
 
-
   function num(v, fallback) {
-
     var n = parseFloat(v);
-
-    return Number.isFinite(n)
-      ? n
-      : (fallback || 0);
+    return isFinite(n) ? n : (fallback || 0);
   }
 
-
-  function inchToMM(v) {
-
-    return num(v) * 25.4;
+  function clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v));
   }
 
-
-  function getState() {
-
-    return (
-      window.AppState ||
-      window.state ||
-      {}
-    );
+  function esc(v) {
+    return String(v == null ? "" : v)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
-
 
   /* =========================================================
-     MASTER DATA
+     STATE
+     ========================================================= */
+
+  function getState() {
+    if (window.AppState) return window.AppState;
+    if (window.state) return window.state;
+
+    return {
+      lenLines: [],
+      depLines: []
+    };
+  }
+
+  /* =========================================================
+     MASTER GEOMETRY
      ========================================================= */
 
   function getMasterData() {
-
     if (
       !window.GeometryEngine ||
       typeof window.GeometryEngine.analyze !== "function"
     ) {
-
-      console.error(
-        "Flat: GeometryEngine not available"
-      );
-
+      console.warn("Flat: GeometryEngine.analyze() unavailable");
       return null;
     }
 
     try {
-
-      masterData =
-        window.GeometryEngine.analyze(
-          getState()
-        );
-
-      return masterData;
-
+      return window.GeometryEngine.analyze(getState());
     } catch (err) {
-
-      console.error(
-        "Flat: GeometryEngine analyze failed",
-        err
-      );
-
+      console.error("Flat: GeometryEngine error", err);
       return null;
     }
   }
 
-
   /* =========================================================
-     INIT
+     CANVAS
      ========================================================= */
 
-  function init() {
+  var canvas = null;
+  var ctx = null;
 
-    container =
-      $("flat-container");
+  var view = {
+    zoom: 1,
+    panX: 0,
+    panY: 0
+  };
 
-    canvas =
-      $("canvasFlat");
+  var dragging = false;
+  var lastX = 0;
+  var lastY = 0;
+
+  var currentData = null;
+
+  /* =========================================================
+     INIT CANVAS
+     ========================================================= */
+
+  function getCanvas() {
+    if (canvas && ctx) {
+      return true;
+    }
+
+    canvas = $("canvasFlat");
 
     if (!canvas) {
+      console.warn("Flat: #canvasFlat not found");
+      return false;
+    }
 
-      console.warn(
-        "Flat: #canvasFlat not found"
+    ctx = canvas.getContext("2d");
+
+    if (!ctx) {
+      console.warn("Flat: Canvas context unavailable");
+      return false;
+    }
+
+    setupCanvasSize();
+    bindCanvasEvents();
+
+    return true;
+  }
+
+  function setupCanvasSize() {
+    if (!canvas) return;
+
+    var rect = canvas.getBoundingClientRect();
+
+    var width = Math.max(
+      300,
+      Math.floor(rect.width || canvas.clientWidth || 800)
+    );
+
+    var height = Math.max(
+      250,
+      Math.floor(rect.height || canvas.clientHeight || 500)
+    );
+
+    var dpr = window.devicePixelRatio || 1;
+
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    canvas._logicalWidth = width;
+    canvas._logicalHeight = height;
+  }
+
+  /* =========================================================
+     VIEW TRANSFORM
+     ========================================================= */
+
+  function getCanvasSize() {
+    return {
+      width:
+        canvas._logicalWidth ||
+        canvas.clientWidth ||
+        800,
+
+      height:
+        canvas._logicalHeight ||
+        canvas.clientHeight ||
+        500
+    };
+  }
+
+  function getSheetSize(data) {
+    var sheet = data && data.sheet
+      ? data.sheet
+      : {};
+
+    var width =
+      num(sheet.widthInch) ||
+      num(data && data.totals && data.totals.length) ||
+      1;
+
+    var height =
+      num(sheet.heightInch) ||
+      num(data && data.totals && data.totals.depth) ||
+      1;
+
+    return {
+      width: Math.max(width, 0.1),
+      height: Math.max(height, 0.1)
+    };
+  }
+
+  function fitScale(data) {
+    var size = getSheetSize(data);
+    var c = getCanvasSize();
+
+    var margin = 70;
+
+    var sx =
+      (c.width - margin * 2) /
+      (size.width * 96);
+
+    var sy =
+      (c.height - margin * 2) /
+      (size.height * 96);
+
+    /*
+      96 px = visual scale for 1 inch.
+      Clamp keeps very large/small sheets usable.
+    */
+
+    return clamp(
+      Math.min(sx, sy),
+      0.15,
+      5
+    );
+  }
+
+  function worldToScreen(x, y, data) {
+    var size = getSheetSize(data);
+    var c = getCanvasSize();
+
+    var baseScale = 96 * view.zoom;
+
+    var sheetW = size.width * baseScale;
+    var sheetH = size.height * baseScale;
+
+    var ox =
+      (c.width - sheetW) / 2 +
+      view.panX;
+
+    var oy =
+      (c.height - sheetH) / 2 +
+      view.panY;
+
+    return {
+      x: ox + x * baseScale,
+      y: oy + y * baseScale
+    };
+  }
+
+  function screenToWorld(px, py, data) {
+    var size = getSheetSize(data);
+    var c = getCanvasSize();
+
+    var baseScale = 96 * view.zoom;
+
+    var sheetW = size.width * baseScale;
+    var sheetH = size.height * baseScale;
+
+    var ox =
+      (c.width - sheetW) / 2 +
+      view.panX;
+
+    var oy =
+      (c.height - sheetH) / 2 +
+      view.panY;
+
+    return {
+      x: (px - ox) / baseScale,
+      y: (py - oy) / baseScale
+    };
+  }
+
+  /* =========================================================
+     BACKGROUND
+     ========================================================= */
+
+  function drawBackground() {
+    var c = getCanvasSize();
+
+    ctx.save();
+
+    ctx.fillStyle = "#101418";
+    ctx.fillRect(0, 0, c.width, c.height);
+
+    ctx.restore();
+  }
+
+  /* =========================================================
+     SHEET
+     ========================================================= */
+
+  function drawSheet(data) {
+    var size = getSheetSize(data);
+
+    var a = worldToScreen(
+      0,
+      0,
+      data
+    );
+
+    var b = worldToScreen(
+      size.width,
+      size.height,
+      data
+    );
+
+    ctx.save();
+
+    ctx.fillStyle = "#c8ccd0";
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+
+    ctx.fillRect(
+      a.x,
+      a.y,
+      b.x - a.x,
+      b.y - a.y
+    );
+
+    ctx.strokeRect(
+      a.x,
+      a.y,
+      b.x - a.x,
+      b.y - a.y
+    );
+
+    ctx.restore();
+  }
+
+  /* =========================================================
+     GRID
+     ========================================================= */
+
+  function drawGrid(data) {
+    var size = getSheetSize(data);
+
+    ctx.save();
+
+    ctx.lineWidth = 0.5;
+    ctx.strokeStyle = "rgba(60,60,60,0.35)";
+
+    /*
+      1 inch grid
+    */
+
+    for (var x = 1; x < size.width; x++) {
+      var p1 = worldToScreen(x, 0, data);
+      var p2 = worldToScreen(x, size.height, data);
+
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+    }
+
+    for (var y = 1; y < size.height; y++) {
+      var q1 = worldToScreen(0, y, data);
+      var q2 = worldToScreen(size.width, y, data);
+
+      ctx.beginPath();
+      ctx.moveTo(q1.x, q1.y);
+      ctx.lineTo(q2.x, q2.y);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  /* =========================================================
+     LINE POSITION HELPERS
+     ========================================================= */
+
+  function linePosition(line, side, index) {
+    /*
+      Prefer GeometryEngine's calculated position.
+    */
+
+    if (
+      line &&
+      line.bendCenterInch != null
+    ) {
+      return num(line.bendCenterInch);
+    }
+
+    if (
+      line &&
+      line.positionInch != null
+    ) {
+      return num(line.positionInch);
+    }
+
+    if (
+      line &&
+      line.position != null
+    ) {
+      return num(line.position);
+    }
+
+    /*
+      Compatibility fallback.
+      Uses actual entered line sizes.
+    */
+
+    var list =
+      side === "length"
+        ? (
+          Array.isArray(
+            currentData && currentData.input &&
+            currentData.input.lengthLines
+          )
+            ? currentData.input.lengthLines
+            : []
+        )
+        : (
+          Array.isArray(
+            currentData && currentData.input &&
+            currentData.input.depthLines
+          )
+            ? currentData.input.depthLines
+            : []
+        );
+
+    var pos = 0;
+
+    for (
+      var i = 0;
+      i <= index && i < list.length;
+      i++
+    ) {
+      pos += num(
+        list[i].sizeInch != null
+          ? list[i].sizeInch
+          : list[i].size
+      );
+    }
+
+    return pos;
+  }
+
+  /* =========================================================
+     BEND LINES
+     ========================================================= */
+
+  function drawLengthLines(data) {
+    var lines = Array.isArray(data.lengthLines)
+      ? data.lengthLines
+      : [];
+
+    var sheet = getSheetSize(data);
+
+    lines.forEach(function (line, index) {
+      var x = linePosition(
+        line,
+        "length",
+        index
       );
 
+      if (x <= 0 || x >= sheet.width) {
+        return;
+      }
+
+      drawBendLine(
+        x,
+        0,
+        x,
+        sheet.height,
+        line
+      );
+    });
+  }
+
+  function drawDepthLines(data) {
+    var lines = Array.isArray(data.depthLines)
+      ? data.depthLines
+      : [];
+
+    var sheet = getSheetSize(data);
+
+    lines.forEach(function (line, index) {
+      var y = linePosition(
+        line,
+        "depth",
+        index
+      );
+
+      if (y <= 0 || y >= sheet.height) {
+        return;
+      }
+
+      drawBendLine(
+        0,
+        y,
+        sheet.width,
+        y,
+        line
+      );
+    });
+  }
+
+  function drawBendLine(
+    x1,
+    y1,
+    x2,
+    y2,
+    line
+  ) {
+    var p1 = worldToScreen(
+      x1,
+      y1,
+      currentData
+    );
+
+    var p2 = worldToScreen(
+      x2,
+      y2,
+      currentData
+    );
+
+    ctx.save();
+
+    ctx.strokeStyle = "#1976ff";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 5]);
+
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+
+    /*
+      Direction marker
+    */
+
+    var direction =
+      String(
+        line.direction ||
+        line.bend ||
+        ""
+      ).toLowerCase();
+
+    var midX = (p1.x + p2.x) / 2;
+    var midY = (p1.y + p2.y) / 2;
+
+    ctx.fillStyle =
+      direction === "down"
+        ? "#ff9800"
+        : "#00c853";
+
+    ctx.font = "bold 11px Arial";
+    ctx.textAlign = "center";
+
+    ctx.fillText(
+      direction === "down"
+        ? "↓"
+        : "↑",
+      midX,
+      midY - 4
+    );
+
+    ctx.restore();
+  }
+
+  /* =========================================================
+     CUT LOOKUP
+     ========================================================= */
+
+  function getCuts(data) {
+    return Array.isArray(data.cuts)
+      ? data.cuts
+      : [];
+  }
+
+  function isCutHidden(id) {
+    if (
+      window.hiddenCuts &&
+      window.hiddenCuts[id]
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /* =========================================================
+     CUT POSITION
+     ========================================================= */
+
+  function cutPosition(cut, data) {
+    var x =
+      cut.xInch != null
+        ? num(cut.xInch)
+        : 0;
+
+    var y =
+      cut.yInch != null
+        ? num(cut.yInch)
+        : 0;
+
+    var width =
+      cut.widthInch != null
+        ? num(cut.widthInch)
+        : num(cut.widthMM) / 25.4;
+
+    var height =
+      cut.depthInch != null
+        ? num(cut.depthInch)
+        : num(cut.depthMM) / 25.4;
+
+    return {
+      x: x,
+      y: y,
+      width: Math.max(width, 0.05),
+      height: Math.max(height, 0.05)
+    };
+  }
+
+  /* =========================================================
+     DRAW ONE CUT
+     ========================================================= */
+
+  function drawCutShape(cut, data) {
+    if (!cut) return;
+
+    if (
+      cut.id &&
+      isCutHidden(cut.id)
+    ) {
       return;
     }
 
-    ctx =
-      canvas.getContext(
-        "2d"
+    var r = cutPosition(
+      cut,
+      data
+    );
+
+    var p1 = worldToScreen(
+      r.x,
+      r.y,
+      data
+    );
+
+    var p2 = worldToScreen(
+      r.x + r.width,
+      r.y + r.height,
+      data
+    );
+
+    var w = p2.x - p1.x;
+    var h = p2.y - p1.y;
+
+    ctx.save();
+
+    /*
+      Red = physical cup-cut area
+    */
+
+    ctx.fillStyle =
+      "rgba(244,67,54,0.30)";
+
+    ctx.strokeStyle =
+      "#ff2020";
+
+    ctx.lineWidth = 2;
+
+    ctx.fillRect(
+      p1.x,
+      p1.y,
+      w,
+      h
+    );
+
+    ctx.strokeRect(
+      p1.x,
+      p1.y,
+      w,
+      h
+    );
+
+    /*
+      X marker
+    */
+
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+
+    ctx.moveTo(
+      p2.x,
+      p1.y
+    );
+    ctx.lineTo(
+      p1.x,
+      p2.y
+    );
+
+    ctx.stroke();
+
+    /*
+      CUT label
+    */
+
+    ctx.fillStyle = "#d50000";
+    ctx.font = "bold 10px Arial";
+    ctx.textAlign = "center";
+
+    ctx.fillText(
+      "CUT",
+      p1.x + w / 2,
+      p1.y + h / 2
+    );
+
+    ctx.restore();
+  }
+
+  /* =========================================================
+     DRAW CUTS
+     ---------------------------------------------------------
+     THIS FUNCTION FIXES:
+     ReferenceError: drawCuts is not defined
+     ========================================================= */
+
+  function drawCuts(data) {
+    var cuts = getCuts(data);
+
+    if (!cuts.length) {
+      return;
+    }
+
+    cuts.forEach(function (cut) {
+      drawCutShape(
+        cut,
+        data
+      );
+    });
+  }
+
+  /* =========================================================
+     INTERSECTION POINTS
+     ========================================================= */
+
+  function drawIntersections(data) {
+    var intersections =
+      Array.isArray(data.intersections)
+        ? data.intersections
+        : [];
+
+    intersections.forEach(function (item) {
+      if (!item) return;
+
+      /*
+        If this intersection already has
+        a cup cut, don't add another yellow
+        marker on top.
+      */
+
+      if (
+        item.required ||
+        item.cutRequired ||
+        item.hasCut
+      ) {
+        return;
+      }
+
+      var x =
+        item.xInch != null
+          ? num(item.xInch)
+          : null;
+
+      var y =
+        item.yInch != null
+          ? num(item.yInch)
+          : null;
+
+      if (
+        x == null ||
+        y == null
+      ) {
+        return;
+      }
+
+      var p = worldToScreen(
+        x,
+        y,
+        data
       );
 
-    bindEvents();
+      ctx.save();
 
-    resize();
+      ctx.fillStyle = "#ffd600";
+
+      ctx.beginPath();
+      ctx.arc(
+        p.x,
+        p.y,
+        4,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fill();
+
+      ctx.restore();
+    });
+  }
+
+  /* =========================================================
+     DIMENSIONS
+     ========================================================= */
+
+  function drawDimensions(data) {
+    var size = getSheetSize(data);
+
+    var p1 = worldToScreen(
+      0,
+      0,
+      data
+    );
+
+    var p2 = worldToScreen(
+      size.width,
+      0,
+      data
+    );
+
+    var p3 = worldToScreen(
+      0,
+      size.height,
+      data
+    );
+
+    ctx.save();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 12px Arial";
+
+    ctx.textAlign = "center";
+
+    ctx.fillText(
+      size.width.toFixed(3)
+        .replace(/\.?0+$/, "") +
+      '"',
+      (p1.x + p2.x) / 2,
+      p1.y - 10
+    );
+
+    ctx.save();
+
+    ctx.translate(
+      p3.x - 12,
+      (p1.y + p3.y) / 2
+    );
+
+    ctx.rotate(-Math.PI / 2);
+
+    ctx.fillText(
+      size.height.toFixed(3)
+        .replace(/\.?0+$/, "") +
+      '"',
+      0,
+      0
+    );
+
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /* =========================================================
+     LEGEND
+     ========================================================= */
+
+  function drawLegend() {
+    var c = getCanvasSize();
+
+    ctx.save();
+
+    ctx.font = "11px Arial";
+    ctx.textAlign = "left";
+
+    var x = 12;
+    var y = c.height - 45;
+
+    ctx.strokeStyle = "#1976ff";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([7, 4]);
+
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + 28, y);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(
+      "BEND / MARK",
+      x + 36,
+      y + 4
+    );
+
+    ctx.fillStyle = "#ff2020";
+
+    ctx.fillRect(
+      x,
+      y + 12,
+      28,
+      10
+    );
+
+    ctx.fillStyle = "#ffffff";
+
+    ctx.fillText(
+      "CUP CUT",
+      x + 36,
+      y + 21
+    );
+
+    ctx.restore();
+  }
+
+  /* =========================================================
+     EMPTY STATE
+     ========================================================= */
+
+  function drawEmpty(message) {
+    var c = getCanvasSize();
+
+    ctx.save();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 15px Arial";
+    ctx.textAlign = "center";
+
+    ctx.fillText(
+      message,
+      c.width / 2,
+      c.height / 2
+    );
+
+    ctx.restore();
+  }
+
+  /* =========================================================
+     MAIN DRAW
+     ========================================================= */
+
+  function draw() {
+    if (!getCanvas()) {
+      return;
+    }
+
+    setupCanvasSize();
+
+    currentData =
+      getMasterData();
+
+    drawBackground();
+
+    if (!currentData) {
+      drawEmpty(
+        "Geometry Engine unavailable"
+      );
+      return;
+    }
+
+    var size =
+      getSheetSize(currentData);
+
+    if (
+      size.width <= 0 ||
+      size.height <= 0
+    ) {
+      drawEmpty(
+        "Enter Length / Depth sizes"
+      );
+      return;
+    }
+
+    /*
+      IMPORTANT ORDER:
+      1. Sheet
+      2. Grid
+      3. Bend lines
+      4. Intersections
+      5. Cuts
+      6. Dimensions
+      7. Legend
+
+      Cuts are drawn LAST so red cut area
+      visually replaces the blue line.
+    */
+
+    drawSheet(currentData);
+    drawGrid(currentData);
+
+    drawLengthLines(
+      currentData
+    );
+
+    drawDepthLines(
+      currentData
+    );
+
+    drawIntersections(
+      currentData
+    );
+
+    drawCuts(
+      currentData
+    );
+
+    drawDimensions(
+      currentData
+    );
+
+    drawLegend();
+  }
+
+  /* =========================================================
+     FIT
+     ========================================================= */
+
+  function fit() {
+    view.zoom =
+      fitScale(
+        currentData ||
+        getMasterData()
+      );
+
+    view.panX = 0;
+    view.panY = 0;
 
     draw();
   }
 
-
   /* =========================================================
-     EVENTS
+     RESET
      ========================================================= */
 
-  function bindEvents() {
+  function reset() {
+    var data =
+      currentData ||
+      getMasterData();
 
-    window.addEventListener(
-      "resize",
-      function () {
+    if (!data) {
+      view.zoom = 1;
+    } else {
+      view.zoom =
+        fitScale(data);
+    }
 
-        clearTimeout(
-          resizeTimer
-        );
+    view.panX = 0;
+    view.panY = 0;
 
-        resizeTimer =
-          setTimeout(
-            function () {
+    draw();
+  }
 
-              resize();
-              draw();
+  /* =========================================================
+     ZOOM
+     ========================================================= */
 
-            },
-            100
-          );
-      }
-    );
+  function zoomIn() {
+    view.zoom =
+      clamp(
+        view.zoom * 1.2,
+        0.15,
+        20
+      );
 
+    draw();
+  }
 
-    canvas.addEventListener(
-      "wheel",
-      function (e) {
+  function zoomOut() {
+    view.zoom =
+      clamp(
+        view.zoom / 1.2,
+        0.15,
+        20
+      );
 
-        e.preventDefault();
+    draw();
+  }
 
-        if (!window.flatView) {
+  /* =========================================================
+     PAN / DRAG
+     ========================================================= */
 
-          window.flatView = {
-            zoom: 1,
-            panX: 0,
-            panY: 0
-          };
-        }
-
-        var factor =
-          e.deltaY < 0
-            ? 1.1
-            : 0.9;
-
-        window.flatView.zoom =
-          Math.max(
-            window.ZOOM_MIN || 0.2,
-            Math.min(
-              window.ZOOM_MAX || 20,
-              window.flatView.zoom *
-              factor
-            )
-          );
-
-        draw();
-
-      },
-      {
-        passive: false
-      }
-    );
-
-
-    var dragging = false;
-
-    var lastX = 0;
-    var lastY = 0;
-
+  function bindCanvasEvents() {
+    if (!canvas) return;
 
     canvas.addEventListener(
       "pointerdown",
       function (e) {
-
         dragging = true;
 
         lastX = e.clientX;
         lastY = e.clientY;
 
-        canvas.setPointerCapture(
-          e.pointerId
-        );
+        try {
+          canvas.setPointerCapture(
+            e.pointerId
+          );
+        } catch (_) {}
       }
     );
-
 
     canvas.addEventListener(
       "pointermove",
       function (e) {
-
-        if (!dragging) {
-          return;
-        }
-
-        if (!window.flatView) {
-
-          window.flatView = {
-            zoom: 1,
-            panX: 0,
-            panY: 0
-          };
-        }
+        if (!dragging) return;
 
         var dx =
           e.clientX - lastX;
@@ -255,8 +1113,8 @@
         var dy =
           e.clientY - lastY;
 
-        window.flatView.panX += dx;
-        window.flatView.panY += dy;
+        view.panX += dx;
+        view.panY += dy;
 
         lastX = e.clientX;
         lastY = e.clientY;
@@ -265,11 +1123,9 @@
       }
     );
 
-
     canvas.addEventListener(
       "pointerup",
       function (e) {
-
         dragging = false;
 
         try {
@@ -280,1657 +1136,209 @@
       }
     );
 
-
     canvas.addEventListener(
       "pointercancel",
       function () {
-
         dragging = false;
       }
     );
 
+    canvas.addEventListener(
+      "wheel",
+      function (e) {
+        e.preventDefault();
+
+        if (e.deltaY < 0) {
+          view.zoom *= 1.1;
+        } else {
+          view.zoom /= 1.1;
+        }
+
+        view.zoom =
+          clamp(
+            view.zoom,
+            0.15,
+            20
+          );
+
+        draw();
+      },
+      {
+        passive: false
+      }
+    );
 
     /*
-       Tap a red cut to hide/show it.
+      Click a cut to hide/show it.
     */
 
     canvas.addEventListener(
       "click",
       function (e) {
+        if (!currentData) return;
 
-        toggleCutAtPoint(
-          e.clientX,
-          e.clientY
-        );
+        var rect =
+          canvas.getBoundingClientRect();
+
+        var px =
+          e.clientX -
+          rect.left;
+
+        var py =
+          e.clientY -
+          rect.top;
+
+        var world =
+          screenToWorld(
+            px,
+            py,
+            currentData
+          );
+
+        var cuts =
+          getCuts(
+            currentData
+          );
+
+        cuts.forEach(function (cut) {
+          var r =
+            cutPosition(
+              cut,
+              currentData
+            );
+
+          if (
+            world.x >= r.x &&
+            world.x <=
+              r.x + r.width &&
+            world.y >= r.y &&
+            world.y <=
+              r.y + r.height
+          ) {
+            if (!window.hiddenCuts) {
+              window.hiddenCuts = {};
+            }
+
+            window.hiddenCuts[
+              cut.id
+            ] =
+              !window.hiddenCuts[
+                cut.id
+              ];
+
+            draw();
+          }
+        });
+      }
+    );
+
+    window.addEventListener(
+      "resize",
+      function () {
+        setupCanvasSize();
+        draw();
       }
     );
   }
 
-
   /* =========================================================
-     RESIZE
+     BUTTON HELPERS
      ========================================================= */
 
-  function resize() {
-
-    if (!canvas) {
-      return;
-    }
-
-    var rect =
-      canvas.getBoundingClientRect();
-
-    var dpr =
-      window.devicePixelRatio || 1;
-
-    var width =
-      Math.max(
-        300,
-        rect.width || 300
-      );
-
-    var height =
-      Math.max(
-        300,
-        rect.height || 300
-      );
-
-    canvas.width =
-      Math.round(
-        width * dpr
-      );
-
-    canvas.height =
-      Math.round(
-        height * dpr
-      );
-
-    ctx.setTransform(
-      dpr,
-      0,
-      0,
-      dpr,
-      0,
-      0
-    );
-  }
-
-
-  /* =========================================================
-     VIEW TRANSFORM
-     ========================================================= */
-
-  function getView() {
-
-    if (!window.flatView) {
-
-      window.flatView = {
-
-        zoom: 1,
-
-        panX: 0,
-
-        panY: 0
-      };
-    }
-
-    return window.flatView;
-  }
-
-
-  function calculateScale(data) {
-
-    var view =
-      getView();
-
-    var widthInch =
-      num(
-        data.sheet &&
-        data.sheet.widthInch,
-        data.totals &&
-        data.totals.length
-      );
-
-    var heightInch =
-      num(
-        data.sheet &&
-        data.sheet.heightInch,
-        data.totals &&
-        data.totals.depth
-      );
-
-    widthInch =
-      Math.max(
-        widthInch,
-        0.001
-      );
-
-    heightInch =
-      Math.max(
-        heightInch,
-        0.001
-      );
-
-    var rect =
-      canvas.getBoundingClientRect();
-
-    var availableW =
-      Math.max(
-        100,
-        rect.width - 100
-      );
-
-    var availableH =
-      Math.max(
-        100,
-        rect.height - 100
-      );
-
-    var sx =
-      availableW /
-      inchToMM(widthInch);
-
-    var sy =
-      availableH /
-      inchToMM(heightInch);
-
-    return (
-      Math.min(
-        sx,
-        sy
-      ) *
-      view.zoom
-    );
-  }
-
-
-  function sheetToCanvas(
-    xInch,
-    yInch,
-    data
+  function bindButton(
+    id,
+    fn
   ) {
+    var el = $(id);
 
-    var scale =
-      calculateScale(data);
+    if (!el) return;
 
-    var view =
-      getView();
-
-    var width =
-      canvas.getBoundingClientRect().width;
-
-    var height =
-      canvas.getBoundingClientRect().height;
-
-    var sheetW =
-      inchToMM(
-        num(
-          data.sheet.widthInch
-        )
-      ) * scale;
-
-    var sheetH =
-      inchToMM(
-        num(
-          data.sheet.heightInch
-        )
-      ) * scale;
-
-    var originX =
-      (
-        width -
-        sheetW
-      ) / 2 +
-      view.panX;
-
-    var originY =
-      (
-        height -
-        sheetH
-      ) / 2 +
-      view.panY;
-
-    return {
-
-      x:
-        originX +
-        inchToMM(xInch) *
-        scale,
-
-      y:
-        originY +
-        inchToMM(yInch) *
-        scale
-    };
+    el.addEventListener(
+      "click",
+      function (e) {
+        e.preventDefault();
+        fn();
+      }
+    );
   }
 
-
   /* =========================================================
-     DRAW
+     INIT
      ========================================================= */
 
-  function draw() {
-
-    if (!canvas || !ctx) {
+  function init() {
+    if (!getCanvas()) {
       return;
     }
 
-    var data =
+    /*
+      Initial fit
+    */
+
+    currentData =
       getMasterData();
 
-    if (!data) {
-      return;
-    }
-
-    masterData =
-      data;
-
-    var rect =
-      canvas.getBoundingClientRect();
-
-    var width =
-      rect.width;
-
-    var height =
-      rect.height;
-
-    ctx.clearRect(
-      0,
-      0,
-      width,
-      height
-    );
-
-    drawBackground(
-      width,
-      height
-    );
-
-    drawSheetOutline(
-      data
-    );
-
-    drawGrid(
-      data
-    );
-
-    drawMarkingLines(
-      data
-    );
-
-    drawIntersections(
-      data
-    );
-
-    drawCuts(
-      data
-    );
-
-    drawDimensions(
-      data
-    );
-
-    drawLegend(
-      data
-    );
-  }
-
-
-  /* =========================================================
-     BACKGROUND
-     ========================================================= */
-
-  function drawBackground(
-    width,
-    height
-  ) {
-
-    ctx.fillStyle =
-      "#111318";
-
-    ctx.fillRect(
-      0,
-      0,
-      width,
-      height
-    );
-  }
-
-
-  /* =========================================================
-     SHEET OUTLINE
-     ========================================================= */
-
-  function drawSheetOutline(
-    data
-  ) {
-
-    var sheet =
-      data.sheet;
-
-    if (!sheet) {
-      return;
-    }
-
-    var p0 =
-      sheetToCanvas(
-        0,
-        0,
-        data
-      );
-
-    var p1 =
-      sheetToCanvas(
-        sheet.widthInch,
-        sheet.heightInch,
-        data
-      );
-
-    var x =
-      p0.x;
-
-    var y =
-      p0.y;
-
-    var w =
-      p1.x - p0.x;
-
-    var h =
-      p1.y - p0.y;
-
-    ctx.save();
-
-    ctx.fillStyle =
-      "#d8d8d8";
-
-    ctx.fillRect(
-      x,
-      y,
-      w,
-      h
-    );
-
-    ctx.strokeStyle =
-      "#ffffff";
-
-    ctx.lineWidth =
-      2;
-
-    ctx.strokeRect(
-      x,
-      y,
-      w,
-      h
-    );
-
-    ctx.restore();
-  }
-
-
-  /* =========================================================
-     GRID
-     ========================================================= */
-
-  function drawGrid(
-    data
-  ) {
-
-    var sheet =
-      data.sheet;
-
-    if (!sheet) {
-      return;
-    }
-
-    var maxX =
-      num(
-        sheet.widthInch
-      );
-
-    var maxY =
-      num(
-        sheet.heightInch
-      );
-
-    ctx.save();
-
-    ctx.strokeStyle =
-      "rgba(0,0,0,0.10)";
-
-    ctx.lineWidth =
-      1;
-
-    /*
-       1 inch grid
-    */
-
-    for (
-      var x = 1;
-      x < maxX;
-      x++
-    ) {
-
-      var a =
-        sheetToCanvas(
-          x,
-          0,
-          data
+    if (currentData) {
+      view.zoom =
+        fitScale(
+          currentData
         );
-
-      var b =
-        sheetToCanvas(
-          x,
-          maxY,
-          data
-        );
-
-      ctx.beginPath();
-
-      ctx.moveTo(
-        a.x,
-        a.y
-      );
-
-      ctx.lineTo(
-        b.x,
-        b.y
-      );
-
-      ctx.stroke();
     }
 
-
-    for (
-      var y = 1;
-      y < maxY;
-      y++
-    ) {
-
-      var c =
-        sheetToCanvas(
-          0,
-          y,
-          data
-        );
-
-      var d =
-        sheetToCanvas(
-          maxX,
-          y,
-          data
-        );
-
-      ctx.beginPath();
-
-      ctx.moveTo(
-        c.x,
-        c.y
-      );
-
-      ctx.lineTo(
-        d.x,
-        d.y
-      );
-
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  }
-
-
-  /* =========================================================
-     MARKING LINES
-     ========================================================= */
-
-  function drawMarkingLines(
-    data
-  ) {
-
-    var lengthLines =
-      data.flat &&
-      data.flat.lengthLines
-        ? data.flat.lengthLines
-        : [];
-
-    var depthLines =
-      data.flat &&
-      data.flat.depthLines
-        ? data.flat.depthLines
-        : [];
-
-
-    /*
-       LENGTH BENDS
-       vertical
-    */
-
-    lengthLines.forEach(
-      function (line) {
-
-        if (
-          !line.isBend
-        ) {
-          return;
-        }
-
-        var x =
-          line.bendCenterInch;
-
-        /*
-           If this bend is replaced
-           by a physical cup cut,
-           don't draw the blue line
-           through the cut area.
-        */
-
-        var cut =
-          findCutForLengthLine(
-            data,
-            line.id
-          );
-
-        if (cut) {
-
-          drawVerticalBendWithCut(
-            x,
-            cut,
-            data,
-            line
-          );
-
-        } else {
-
-          drawVerticalBend(
-            x,
-            data,
-            line
-          );
-        }
-      }
+    bindButton(
+      "flat-zoom-in",
+      zoomIn
     );
 
-
-    /*
-       DEPTH BENDS
-       horizontal
-    */
-
-    depthLines.forEach(
-      function (line) {
-
-        if (
-          !line.isBend
-        ) {
-          return;
-        }
-
-        var y =
-          line.bendCenterInch;
-
-        var cut =
-          findCutForDepthLine(
-            data,
-            line.id
-          );
-
-        if (cut) {
-
-          drawHorizontalBendWithCut(
-            y,
-            cut,
-            data,
-            line
-          );
-
-        } else {
-
-          drawHorizontalBend(
-            y,
-            data,
-            line
-          );
-        }
-      }
-    );
-  }
-
-
-  /* =========================================================
-     BLUE BEND LINE
-     ========================================================= */
-
-  function drawVerticalBend(
-    xInch,
-    data,
-    line
-  ) {
-
-    var a =
-      sheetToCanvas(
-        xInch,
-        0,
-        data
-      );
-
-    var b =
-      sheetToCanvas(
-        xInch,
-        data.sheet.heightInch,
-        data
-      );
-
-    ctx.save();
-
-    ctx.strokeStyle =
-      "#2388ff";
-
-    ctx.lineWidth =
-      2;
-
-    ctx.setLineDash(
-      [8, 6]
+    bindButton(
+      "flat-zoom-out",
+      zoomOut
     );
 
-    ctx.beginPath();
-
-    ctx.moveTo(
-      a.x,
-      a.y
+    bindButton(
+      "flat-reset",
+      reset
     );
 
-    ctx.lineTo(
-      b.x,
-      b.y
+    bindButton(
+      "zoom-in",
+      zoomIn
     );
 
-    ctx.stroke();
-
-    ctx.setLineDash([]);
-
-    drawLineLabel(
-      a.x + 5,
-      a.y + 16,
-      line.id +
-      " " +
-      line.angle +
-      "° " +
-      line.direction
+    bindButton(
+      "zoom-out",
+      zoomOut
     );
 
-    ctx.restore();
-  }
-
-
-  function drawHorizontalBend(
-    yInch,
-    data,
-    line
-  ) {
-
-    var a =
-      sheetToCanvas(
-        0,
-        yInch,
-        data
-      );
-
-    var b =
-      sheetToCanvas(
-        data.sheet.widthInch,
-        yInch,
-        data
-      );
-
-    ctx.save();
-
-    ctx.strokeStyle =
-      "#2388ff";
-
-    ctx.lineWidth =
-      2;
-
-    ctx.setLineDash(
-      [8, 6]
+    bindButton(
+      "reset-view",
+      reset
     );
-
-    ctx.beginPath();
-
-    ctx.moveTo(
-      a.x,
-      a.y
-    );
-
-    ctx.lineTo(
-      b.x,
-      b.y
-    );
-
-    ctx.stroke();
-
-    ctx.setLineDash([]);
-
-    drawLineLabel(
-      a.x + 5,
-      a.y + 16,
-      line.id +
-      " " +
-      line.angle +
-      "° " +
-      line.direction
-    );
-
-    ctx.restore();
-  }
-
-
-  /* =========================================================
-     BEND + CUT
-     ---------------------------------------------------------
-     RED CUT REPLACES BLUE LINE.
-     ========================================================= */
-
-  function drawVerticalBendWithCut(
-    xInch,
-    cut,
-    data,
-    line
-  ) {
-
-    var top =
-      sheetToCanvas(
-        xInch,
-        0,
-        data
-      );
-
-    var bottom =
-      sheetToCanvas(
-        xInch,
-        data.sheet.heightInch,
-        data
-      );
-
-    var center =
-      sheetToCanvas(
-        cut.xInch,
-        cut.yInch,
-        data
-      );
-
-    var cutDepthInch =
-      num(
-        cut.depthInch,
-        0
-      );
-
-    var cutHalf =
-      cutDepthInch / 2;
-
-    var y1 =
-      sheetToCanvas(
-        xInch,
-        Math.max(
-          0,
-          cut.yInch -
-          cutHalf
-        ),
-        data
-      );
-
-    var y2 =
-      sheetToCanvas(
-        xInch,
-        Math.min(
-          data.sheet.heightInch,
-          cut.yInch +
-          cutHalf
-        ),
-        data
-      );
-
-
-    ctx.save();
-
-    ctx.strokeStyle =
-      "#2388ff";
-
-    ctx.lineWidth =
-      2;
-
-    ctx.setLineDash(
-      [8, 6]
-    );
-
-    ctx.beginPath();
-
-    ctx.moveTo(
-      top.x,
-      top.y
-    );
-
-    ctx.lineTo(
-      y1.x,
-      y1.y
-    );
-
-    ctx.moveTo(
-      y2.x,
-      y2.y
-    );
-
-    ctx.lineTo(
-      bottom.x,
-      bottom.y
-    );
-
-    ctx.stroke();
-
-    ctx.setLineDash([]);
-
-    /*
-       RED PHYSICAL CUT
-    */
-
-    drawCutShape(
-      cut,
-      data
-    );
-
-    ctx.restore();
-  }
-
-
-  function drawHorizontalBendWithCut(
-    yInch,
-    cut,
-    data,
-    line
-  ) {
-
-    var left =
-      sheetToCanvas(
-        0,
-        yInch,
-        data
-      );
-
-    var right =
-      sheetToCanvas(
-        data.sheet.widthInch,
-        yInch,
-        data
-      );
-
-    var cutDepthInch =
-      num(
-        cut.depthInch,
-        0
-      );
-
-    var cutHalf =
-      cutDepthInch / 2;
-
-    var x1 =
-      sheetToCanvas(
-        Math.max(
-          0,
-          cut.xInch -
-          cutHalf
-        ),
-        yInch,
-        data
-      );
-
-    var x2 =
-      sheetToCanvas(
-        Math.min(
-          data.sheet.widthInch,
-          cut.xInch +
-          cutHalf
-        ),
-        yInch,
-        data
-      );
-
-
-    ctx.save();
-
-    ctx.strokeStyle =
-      "#2388ff";
-
-    ctx.lineWidth =
-      2;
-
-    ctx.setLineDash(
-      [8, 6]
-    );
-
-    ctx.beginPath();
-
-    ctx.moveTo(
-      left.x,
-      left.y
-    );
-
-    ctx.lineTo(
-      x1.x,
-      x1.y
-    );
-
-    ctx.moveTo(
-      x2.x,
-      x2.y
-    );
-
-    ctx.lineTo(
-      right.x,
-      right.y
-    );
-
-    ctx.stroke();
-
-    ctx.setLineDash([]);
-
-    drawCutShape(
-      cut,
-      data
-    );
-
-    ctx.restore();
-  }
-
-
-  /* =========================================================
-     FIND CUTS
-     ========================================================= */
-
-  function findCutForLengthLine(
-    data,
-    id
-  ) {
-
-    var cuts =
-      data.cuts || [];
-
-    for (
-      var i = 0;
-      i < cuts.length;
-      i++
-    ) {
-
-      if (
-        cuts[i].lengthId === id &&
-        !isCutHidden(cuts[i])
-      ) {
-        return cuts[i];
-      }
-    }
-
-    return null;
-  }
-
-
-  function findCutForDepthLine(
-    data,
-    id
-  ) {
-
-    var cuts =
-      data.cuts || [];
-
-    for (
-      var i = 0;
-      i < cuts.length;
-      i++
-    ) {
-
-      if (
-        cuts[i].depthId === id &&
-        !isCutHidden(cuts[i])
-      ) {
-        return cuts[i];
-      }
-    }
-
-    return null;
-  }
-
-
-  function isCutHidden(cut) {
-
-    if (!cut) {
-      return false;
-    }
-
-    if (cut.hidden) {
-      return true;
-    }
-
-    var hidden =
-      window.hiddenCuts ||
-      {};
-
-    return !!hidden[
-      cut.id
-    ];
-  }
-
-
-  /* =========================================================
-     CUT SHAPE
-     ========================================================= */
-
-  function drawCutShape(
-    cut,
-    data
-  ) {
-
-    if (
-      !cut ||
-      isCutHidden(cut)
-    ) {
-      return;
-    }
-
-    var x =
-      num(cut.xInch);
-
-    var y =
-      num(cut.yInch);
-
-    var width =
-      num(cut.widthInch);
-
-    var depth =
-      num(cut.depthInch);
-
-
-    var p1 =
-      sheetToCanvas(
-        x - width / 2,
-        y - depth / 2,
-        data
-      );
-
-    var p2 =
-      sheetToCanvas(
-        x + width / 2,
-        y + depth / 2,
-        data
-      );
-
-    var w =
-      p2.x - p1.x;
-
-    var h =
-      p2.y - p1.y;
-
-
-    ctx.save();
-
-    /*
-       Red = physical cup cut
-    */
-
-    ctx.fillStyle =
-      "rgba(220,40,40,0.85)";
-
-    ctx.strokeStyle =
-      "#ff3030";
-
-    ctx.lineWidth =
-      2;
-
-    ctx.fillRect(
-      p1.x,
-      p1.y,
-      w,
-      h
-    );
-
-    ctx.strokeRect(
-      p1.x,
-      p1.y,
-      w,
-      h
-    );
-
-
-    /*
-       X marker
-    */
-
-    ctx.strokeStyle =
-      "#ffffff";
-
-    ctx.lineWidth =
-      1.5;
-
-    ctx.beginPath();
-
-    ctx.moveTo(
-      p1.x,
-      p1.y
-    );
-
-    ctx.lineTo(
-      p2.x,
-      p2.y
-    );
-
-    ctx.moveTo(
-      p2.x,
-      p1.y
-    );
-
-    ctx.lineTo(
-      p1.x,
-      p2.y
-    );
-
-    ctx.stroke();
-
-
-    /*
-       Label
-    */
-
-    ctx.fillStyle =
-      "#ffffff";
-
-    ctx.font =
-      "bold 11px Arial";
-
-    ctx.fillText(
-      "CUT",
-      p1.x + 4,
-      p1.y + 13
-    );
-
-    ctx.restore();
-  }
-
-
-  /* =========================================================
-     INTERSECTIONS
-     ========================================================= */
-
-  function drawIntersections(
-    data
-  ) {
-
-    var list =
-      data.intersections || [];
-
-    ctx.save();
-
-    list.forEach(
-      function (item) {
-
-        var p =
-          sheetToCanvas(
-            item.xInch,
-            item.yInch,
-            data
-          );
-
-        var required =
-          item.interaction &&
-          item.interaction.required;
-
-        /*
-           If physical cut exists,
-           red cut will represent this point.
-        */
-
-        if (required) {
-          return;
-        }
-
-        ctx.fillStyle =
-          "#ffb400";
-
-        ctx.beginPath();
-
-        ctx.arc(
-          p.x,
-          p.y,
-          3,
-          0,
-          Math.PI * 2
-        );
-
-        ctx.fill();
-      }
-    );
-
-    ctx.restore();
-  }
-
-
-  /* =========================================================
-     DIMENSIONS
-     ========================================================= */
-
-  function drawDimensions(
-    data
-  ) {
-
-    var sheet =
-      data.sheet;
-
-    if (!sheet) {
-      return;
-    }
-
-    var pLeft =
-      sheetToCanvas(
-        0,
-        sheet.heightInch,
-        data
-      );
-
-    var pRight =
-      sheetToCanvas(
-        sheet.widthInch,
-        sheet.heightInch,
-        data
-      );
-
-    var pTop =
-      sheetToCanvas(
-        0,
-        0,
-        data
-      );
-
-    ctx.save();
-
-    ctx.fillStyle =
-      "#111111";
-
-    ctx.font =
-      "bold 12px Arial";
-
-    ctx.textAlign =
-      "center";
-
-    ctx.fillText(
-      formatSize(
-        sheet.widthInch
-      ),
-      (
-        pLeft.x +
-        pRight.x
-      ) / 2,
-      pLeft.y + 25
-    );
-
-    ctx.textAlign =
-      "left";
-
-    ctx.fillText(
-      formatSize(
-        sheet.heightInch
-      ),
-      pTop.x - 5,
-      (
-        pTop.y +
-        pLeft.y
-      ) / 2
-    );
-
-    ctx.restore();
-  }
-
-
-  function formatSize(
-    inch
-  ) {
-
-    if (
-      window.Core &&
-      typeof window.Core.formatInch ===
-      "function"
-    ) {
-
-      return window.Core.formatInch(
-        inch
-      );
-    }
-
-    return (
-      Math.round(
-        num(inch) * 16
-      ) / 16
-    ) + '"';
-  }
-
-
-  /* =========================================================
-     LINE LABEL
-     ========================================================= */
-
-  function drawLineLabel(
-    x,
-    y,
-    text
-  ) {
-
-    ctx.save();
-
-    ctx.fillStyle =
-      "#0758b5";
-
-    ctx.font =
-      "bold 11px Arial";
-
-    ctx.fillText(
-      text,
-      x,
-      y
-    );
-
-    ctx.restore();
-  }
-
-
-  /* =========================================================
-     LEGEND
-     ========================================================= */
-
-  function drawLegend(
-    data
-  ) {
-
-    var cuts =
-      data.cuts || [];
-
-    var bends =
-      data.totals
-        ? data.totals.totalBends
-        : 0;
-
-    ctx.save();
-
-    ctx.font =
-      "11px Arial";
-
-    ctx.fillStyle =
-      "#222222";
-
-    var x = 15;
-    var y = 20;
-
-    ctx.fillText(
-      "MASTER FLAT",
-      x,
-      y
-    );
-
-    y += 17;
-
-    ctx.fillStyle =
-      "#2388ff";
-
-    ctx.fillText(
-      "BEND / MARK",
-      x,
-      y
-    );
-
-    y += 16;
-
-    ctx.fillStyle =
-      "#d82020";
-
-    ctx.fillText(
-      "CUP CUT: " +
-      cuts.length,
-      x,
-      y
-    );
-
-    y += 16;
-
-    ctx.fillStyle =
-      "#222222";
-
-    ctx.fillText(
-      "BENDS: " +
-      bends,
-      x,
-      y
-    );
-
-    ctx.restore();
-  }
-
-
-  /* =========================================================
-     CUT HIT TEST
-     ========================================================= */
-
-  function toggleCutAtPoint(
-    clientX,
-    clientY
-  ) {
-
-    if (!masterData) {
-      return;
-    }
-
-    var rect =
-      canvas.getBoundingClientRect();
-
-    var px =
-      clientX -
-      rect.left;
-
-    var py =
-      clientY -
-      rect.top;
-
-    var cuts =
-      masterData.cuts || [];
-
-    for (
-      var i = 0;
-      i < cuts.length;
-      i++
-    ) {
-
-      var cut =
-        cuts[i];
-
-      var p1 =
-        sheetToCanvas(
-          cut.xInch -
-          cut.widthInch / 2,
-          cut.yInch -
-          cut.depthInch / 2,
-          masterData
-        );
-
-      var p2 =
-        sheetToCanvas(
-          cut.xInch +
-          cut.widthInch / 2,
-          cut.yInch +
-          cut.depthInch / 2,
-          masterData
-        );
-
-      if (
-        px >= p1.x &&
-        px <= p2.x &&
-        py >= p1.y &&
-        py <= p2.y
-      ) {
-
-        if (
-          !window.hiddenCuts
-        ) {
-
-          window.hiddenCuts = {};
-        }
-
-        window.hiddenCuts[
-          cut.id
-        ] =
-          !window.hiddenCuts[
-            cut.id
-          ];
-
-        if (
-          window.view3d
-        ) {
-
-          window.view3d.hiddenCuts =
-            window.hiddenCuts;
-        }
-
-        draw();
-
-        return;
-      }
-    }
-  }
-
-
-  /* =========================================================
-     FIT
-     ========================================================= */
-
-  function fit() {
-
-    if (!window.flatView) {
-
-      window.flatView = {
-        zoom: 1,
-        panX: 0,
-        panY: 0
-      };
-    }
-
-    window.flatView.zoom =
-      1;
-
-    window.flatView.panX =
-      0;
-
-    window.flatView.panY =
-      0;
 
     draw();
   }
-
-
-  /* =========================================================
-     RESET
-     ========================================================= */
-
-  function reset() {
-
-    fit();
-  }
-
-
-  /* =========================================================
-     ZOOM
-     ========================================================= */
-
-  function zoomIn() {
-
-    var view =
-      getView();
-
-    view.zoom =
-      Math.min(
-        window.ZOOM_MAX || 20,
-        view.zoom * 1.2
-      );
-
-    draw();
-  }
-
-
-  function zoomOut() {
-
-    var view =
-      getView();
-
-    view.zoom =
-      Math.max(
-        window.ZOOM_MIN || 0.2,
-        view.zoom * 0.8
-      );
-
-    draw();
-  }
-
-
-  /* =========================================================
-     PRINT
-     ========================================================= */
-
-  function print() {
-
-    window.print();
-  }
-
 
   /* =========================================================
      PUBLIC API
      ========================================================= */
 
-  window.FlatView = {
-
-    init:
-      init,
-
-    draw:
-      draw,
-
-    resize:
-      resize,
-
-    fit:
-      fit,
-
-    reset:
-      reset,
-
-    zoomIn:
-      zoomIn,
-
-    zoomOut:
-      zoomOut,
-
-    print:
-      print,
-
-    getMasterData:
-      getMasterData
+  window.Flat = {
+    init: init,
+    draw: draw,
+    redraw: draw,
+    fit: fit,
+    reset: reset,
+    zoomIn: zoomIn,
+    zoomOut: zoomOut,
+    getMasterData: getMasterData,
+    drawCuts: drawCuts
   };
 
-
   /*
-     Existing sheet.js calls:
-
-       window.Flat.draw()
-
-     Keep compatibility.
+    Compatibility alias
   */
 
-  window.Flat =
-    window.FlatView;
-
-
-  console.log(
-    "Flat View V7 loaded"
-  );
+  window.FlatView =
+    window.Flat;
 
 })();
-
