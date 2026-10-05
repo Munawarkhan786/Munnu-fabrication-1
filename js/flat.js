@@ -1,819 +1,1937 @@
 /* =========================================================
-   FLAT VIEW — MASTER GEOMETRY V6 (FULL DRAWING)
+   FLAT.JS
+   FLAT VIEW — MASTER GEOMETRY V7
    ---------------------------------------------------------
-   FIX V6:
-   - GeometryEngine se poora data leta hai
-   - Length + Depth lines draw karta hai
-   - Bend joints (red dots) draw karta hai
-   - Cup cuts (red rectangles) draw karta hai
-   - Sheet outline + dimensions + legend
-   - Reverse engineering: jo bana woh dikhata hai
+   IMPORTANT:
+   Flat does NOT calculate engineering.
+
+   GeometryEngine = BRAIN
+   Flat = 2D EYES
+
+   FLOW:
+   GeometryEngine.analyze()
+        ↓
+   master sheet
+        ↓
+   bend positions
+        ↓
+   intersections
+        ↓
+   cup cuts
+        ↓
+   canvas drawing
    ========================================================= */
 
 (function () {
+
   "use strict";
 
   var canvas = null;
-  var container = null;
   var ctx = null;
+  var container = null;
 
-  var ready = false;
+  var masterData = null;
 
-  var scale = 45;
-  var offsetX = 40;
-  var offsetY = 60;
+  var resizeTimer = null;
 
-  var isDragging = false;
-  var lastX = 0;
-  var lastY = 0;
 
-  var minScale = 5;
-  var maxScale = 200;
+  /* =========================================================
+     HELPERS
+     ========================================================= */
 
-  function getEl(id) {
+  function $(id) {
     return document.getElementById(id);
   }
 
-  function num(value, fallback) {
-    var n = Number(value);
-    return isFinite(n) ? n : fallback;
+
+  function num(v, fallback) {
+
+    var n = parseFloat(v);
+
+    return Number.isFinite(n)
+      ? n
+      : (fallback || 0);
   }
 
-  function formatNumber(value) {
-    var n = num(value, 0);
-    if (Math.abs(n - Math.round(n)) < 0.0001) {
-      return String(Math.round(n));
-    }
-    return n.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+
+  function inchToMM(v) {
+
+    return num(v) * 25.4;
   }
 
-  function formatInch(value) {
-    if (window.Core && typeof window.Core.formatInch === "function") {
-      return window.Core.formatInch(value);
-    }
-    var n = num(value, 0);
-    if (Math.abs(n) < 0.0001) return "0";
-    return formatNumber(n) + '"';
+
+  function getState() {
+
+    return (
+      window.AppState ||
+      window.state ||
+      {}
+    );
   }
+
 
   /* =========================================================
      MASTER DATA
      ========================================================= */
 
   function getMasterData() {
-    if (!window.GeometryEngine) {
-      console.error("❌ GeometryEngine missing.");
+
+    if (
+      !window.GeometryEngine ||
+      typeof window.GeometryEngine.analyze !== "function"
+    ) {
+
+      console.error(
+        "Flat: GeometryEngine not available"
+      );
+
       return null;
     }
 
     try {
-      var state = window.AppState || window.state || {};
-      return window.GeometryEngine.analyze(state);
+
+      masterData =
+        window.GeometryEngine.analyze(
+          getState()
+        );
+
+      return masterData;
+
     } catch (err) {
-      console.error("❌ Flat GeometryEngine error:", err);
-      if (window.Bugs) {
-        try {
-          window.Bugs.log("flat.geometry", err.message, err.stack);
-        } catch (bugErr) {}
-      }
+
+      console.error(
+        "Flat: GeometryEngine analyze failed",
+        err
+      );
+
       return null;
     }
   }
+
 
   /* =========================================================
      INIT
      ========================================================= */
 
   function init() {
-    container = getEl("flat-container");
-    canvas = getEl("canvasFlat");
+
+    container =
+      $("flat-container");
+
+    canvas =
+      $("canvasFlat");
 
     if (!canvas) {
-      console.warn("⚠️ canvasFlat not found.");
+
+      console.warn(
+        "Flat: #canvasFlat not found"
+      );
+
       return;
     }
 
-    ctx = canvas.getContext("2d");
-
-    if (!ctx) {
-      console.error("❌ 2D canvas unavailable.");
-      return;
-    }
+    ctx =
+      canvas.getContext(
+        "2d"
+      );
 
     bindEvents();
+
     resize();
 
-    ready = true;
-
-    setTimeout(function() {
-      fit();
-    }, 100);
+    draw();
   }
+
 
   /* =========================================================
      EVENTS
      ========================================================= */
 
   function bindEvents() {
-    if (!canvas) return;
 
-    canvas.addEventListener("mousedown", function (e) {
-      isDragging = true;
-      lastX = e.clientX;
-      lastY = e.clientY;
-    });
+    window.addEventListener(
+      "resize",
+      function () {
 
-    canvas.addEventListener("mousemove", function (e) {
-      if (!isDragging) return;
-      var dx = e.clientX - lastX;
-      var dy = e.clientY - lastY;
-      offsetX += dx;
-      offsetY += dy;
-      lastX = e.clientX;
-      lastY = e.clientY;
-      draw();
-    });
+        clearTimeout(
+          resizeTimer
+        );
 
-    canvas.addEventListener("mouseup", function () {
-      isDragging = false;
-    });
+        resizeTimer =
+          setTimeout(
+            function () {
 
-    canvas.addEventListener("mouseleave", function () {
-      isDragging = false;
-    });
+              resize();
+              draw();
 
-    canvas.addEventListener(
-      "touchstart",
-      function (e) {
-        if (e.touches.length !== 1) return;
-        isDragging = true;
-        lastX = e.touches[0].clientX;
-        lastY = e.touches[0].clientY;
-      },
-      { passive: true }
+            },
+            100
+          );
+      }
     );
 
-    canvas.addEventListener(
-      "touchmove",
-      function (e) {
-        if (!isDragging) return;
-        if (e.touches.length !== 1) return;
-        e.preventDefault();
-        var dx = e.touches[0].clientX - lastX;
-        var dy = e.touches[0].clientY - lastY;
-        offsetX += dx;
-        offsetY += dy;
-        lastX = e.touches[0].clientX;
-        lastY = e.touches[0].clientY;
-        draw();
-      },
-      { passive: false }
-    );
-
-    canvas.addEventListener("touchend", function () {
-      isDragging = false;
-    });
 
     canvas.addEventListener(
       "wheel",
       function (e) {
+
         e.preventDefault();
-        var factor = e.deltaY > 0 ? 0.9 : 1.1;
-        scale *= factor;
-        scale = Math.max(minScale, Math.min(maxScale, scale));
+
+        if (!window.flatView) {
+
+          window.flatView = {
+            zoom: 1,
+            panX: 0,
+            panY: 0
+          };
+        }
+
+        var factor =
+          e.deltaY < 0
+            ? 1.1
+            : 0.9;
+
+        window.flatView.zoom =
+          Math.max(
+            window.ZOOM_MIN || 0.2,
+            Math.min(
+              window.ZOOM_MAX || 20,
+              window.flatView.zoom *
+              factor
+            )
+          );
+
         draw();
+
       },
-      { passive: false }
+      {
+        passive: false
+      }
     );
 
-    window.addEventListener("resize", function () {
-      resize();
-      draw();
-    });
+
+    var dragging = false;
+
+    var lastX = 0;
+    var lastY = 0;
+
+
+    canvas.addEventListener(
+      "pointerdown",
+      function (e) {
+
+        dragging = true;
+
+        lastX = e.clientX;
+        lastY = e.clientY;
+
+        canvas.setPointerCapture(
+          e.pointerId
+        );
+      }
+    );
+
+
+    canvas.addEventListener(
+      "pointermove",
+      function (e) {
+
+        if (!dragging) {
+          return;
+        }
+
+        if (!window.flatView) {
+
+          window.flatView = {
+            zoom: 1,
+            panX: 0,
+            panY: 0
+          };
+        }
+
+        var dx =
+          e.clientX - lastX;
+
+        var dy =
+          e.clientY - lastY;
+
+        window.flatView.panX += dx;
+        window.flatView.panY += dy;
+
+        lastX = e.clientX;
+        lastY = e.clientY;
+
+        draw();
+      }
+    );
+
+
+    canvas.addEventListener(
+      "pointerup",
+      function (e) {
+
+        dragging = false;
+
+        try {
+          canvas.releasePointerCapture(
+            e.pointerId
+          );
+        } catch (_) {}
+      }
+    );
+
+
+    canvas.addEventListener(
+      "pointercancel",
+      function () {
+
+        dragging = false;
+      }
+    );
+
+
+    /*
+       Tap a red cut to hide/show it.
+    */
+
+    canvas.addEventListener(
+      "click",
+      function (e) {
+
+        toggleCutAtPoint(
+          e.clientX,
+          e.clientY
+        );
+      }
+    );
   }
+
 
   /* =========================================================
      RESIZE
      ========================================================= */
 
   function resize() {
-    if (!canvas || !ctx) return;
+
+    if (!canvas) {
+      return;
+    }
+
+    var rect =
+      canvas.getBoundingClientRect();
+
+    var dpr =
+      window.devicePixelRatio || 1;
 
     var width =
-      canvas.clientWidth ||
-      (canvas.parentElement && canvas.parentElement.clientWidth) ||
-      320;
+      Math.max(
+        300,
+        rect.width || 300
+      );
 
     var height =
-      canvas.clientHeight ||
-      (canvas.parentElement && canvas.parentElement.clientHeight) ||
-      420;
+      Math.max(
+        300,
+        rect.height || 300
+      );
 
-    var ratio = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width =
+      Math.round(
+        width * dpr
+      );
 
-    canvas.width = Math.max(1, Math.floor(width * ratio));
-    canvas.height = Math.max(1, Math.floor(height * ratio));
-    canvas.style.width = width + "px";
-    canvas.style.height = height + "px";
+    canvas.height =
+      Math.round(
+        height * dpr
+      );
 
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.setTransform(
+      dpr,
+      0,
+      0,
+      dpr,
+      0,
+      0
+    );
   }
+
+
+  /* =========================================================
+     VIEW TRANSFORM
+     ========================================================= */
+
+  function getView() {
+
+    if (!window.flatView) {
+
+      window.flatView = {
+
+        zoom: 1,
+
+        panX: 0,
+
+        panY: 0
+      };
+    }
+
+    return window.flatView;
+  }
+
+
+  function calculateScale(data) {
+
+    var view =
+      getView();
+
+    var widthInch =
+      num(
+        data.sheet &&
+        data.sheet.widthInch,
+        data.totals &&
+        data.totals.length
+      );
+
+    var heightInch =
+      num(
+        data.sheet &&
+        data.sheet.heightInch,
+        data.totals &&
+        data.totals.depth
+      );
+
+    widthInch =
+      Math.max(
+        widthInch,
+        0.001
+      );
+
+    heightInch =
+      Math.max(
+        heightInch,
+        0.001
+      );
+
+    var rect =
+      canvas.getBoundingClientRect();
+
+    var availableW =
+      Math.max(
+        100,
+        rect.width - 100
+      );
+
+    var availableH =
+      Math.max(
+        100,
+        rect.height - 100
+      );
+
+    var sx =
+      availableW /
+      inchToMM(widthInch);
+
+    var sy =
+      availableH /
+      inchToMM(heightInch);
+
+    return (
+      Math.min(
+        sx,
+        sy
+      ) *
+      view.zoom
+    );
+  }
+
+
+  function sheetToCanvas(
+    xInch,
+    yInch,
+    data
+  ) {
+
+    var scale =
+      calculateScale(data);
+
+    var view =
+      getView();
+
+    var width =
+      canvas.getBoundingClientRect().width;
+
+    var height =
+      canvas.getBoundingClientRect().height;
+
+    var sheetW =
+      inchToMM(
+        num(
+          data.sheet.widthInch
+        )
+      ) * scale;
+
+    var sheetH =
+      inchToMM(
+        num(
+          data.sheet.heightInch
+        )
+      ) * scale;
+
+    var originX =
+      (
+        width -
+        sheetW
+      ) / 2 +
+      view.panX;
+
+    var originY =
+      (
+        height -
+        sheetH
+      ) / 2 +
+      view.panY;
+
+    return {
+
+      x:
+        originX +
+        inchToMM(xInch) *
+        scale,
+
+      y:
+        originY +
+        inchToMM(yInch) *
+        scale
+    };
+  }
+
 
   /* =========================================================
      DRAW
      ========================================================= */
 
   function draw() {
-    if (!ready && !canvas) {
-      init();
+
+    if (!canvas || !ctx) {
       return;
     }
 
-    if (!canvas || !ctx) return;
-
-    var width = canvas.clientWidth || canvas.width;
-    var height = canvas.clientHeight || canvas.height;
-
-    ctx.save();
-    ctx.setTransform(
-      window.devicePixelRatio || 1, 0, 0,
-      window.devicePixelRatio || 1, 0, 0
-    );
-    ctx.clearRect(0, 0, width, height);
-    ctx.restore();
-
-    ctx.save();
-    ctx.fillStyle = "#0b0f14";
-    ctx.fillRect(0, 0, width, height);
-    ctx.restore();
-
-    var data = getMasterData();
+    var data =
+      getMasterData();
 
     if (!data) {
-      drawEmpty(width, height, "Geometry data not available");
       return;
     }
 
-    // Check sheet size
-    var sheetWidth = 0;
-    var sheetHeight = 0;
+    masterData =
+      data;
 
-    if (data.sheet) {
-      sheetWidth = num(data.sheet.widthInch, num(data.sheet.width, 0));
-      sheetHeight = num(data.sheet.heightInch, num(data.sheet.height, 0));
-    }
+    var rect =
+      canvas.getBoundingClientRect();
 
-    if (sheetWidth <= 0 || sheetHeight <= 0) {
-      // Fallback: calculate from lengthLines and depthLines
-      if (data.totals) {
-        sheetWidth = num(data.totals.length, num(data.totals.lengthInch, 0));
-        sheetHeight = num(data.totals.depth, num(data.totals.depthInch, 0));
-      }
-    }
+    var width =
+      rect.width;
 
-    if (sheetWidth <= 0 || sheetHeight <= 0) {
-      drawEmpty(width, height, "Sheet size enter karo");
-      return;
-    }
+    var height =
+      rect.height;
 
-    // -----------------------------------------------------
-    // DRAW EVERYTHING
-    // -----------------------------------------------------
+    ctx.clearRect(
+      0,
+      0,
+      width,
+      height
+    );
 
-    drawSheetOutline(data, sheetWidth, sheetHeight);
-    drawSheetGrid(sheetWidth, sheetHeight);
-    drawMarkingLines(data, sheetWidth, sheetHeight);
-    drawBendJoints(data, sheetWidth, sheetHeight);
-    drawCuts(data);
-    drawDimensions(sheetWidth, sheetHeight);
-    drawLegend(data);
+    drawBackground(
+      width,
+      height
+    );
+
+    drawSheetOutline(
+      data
+    );
+
+    drawGrid(
+      data
+    );
+
+    drawMarkingLines(
+      data
+    );
+
+    drawIntersections(
+      data
+    );
+
+    drawCuts(
+      data
+    );
+
+    drawDimensions(
+      data
+    );
+
+    drawLegend(
+      data
+    );
   }
+
+
+  /* =========================================================
+     BACKGROUND
+     ========================================================= */
+
+  function drawBackground(
+    width,
+    height
+  ) {
+
+    ctx.fillStyle =
+      "#111318";
+
+    ctx.fillRect(
+      0,
+      0,
+      width,
+      height
+    );
+  }
+
 
   /* =========================================================
      SHEET OUTLINE
      ========================================================= */
 
-  function drawSheetOutline(data, sheetWidth, sheetHeight) {
-    var x = offsetX;
-    var y = offsetY;
-    var w = sheetWidth * scale;
-    var h = sheetHeight * scale;
+  function drawSheetOutline(
+    data
+  ) {
+
+    var sheet =
+      data.sheet;
+
+    if (!sheet) {
+      return;
+    }
+
+    var p0 =
+      sheetToCanvas(
+        0,
+        0,
+        data
+      );
+
+    var p1 =
+      sheetToCanvas(
+        sheet.widthInch,
+        sheet.heightInch,
+        data
+      );
+
+    var x =
+      p0.x;
+
+    var y =
+      p0.y;
+
+    var w =
+      p1.x - p0.x;
+
+    var h =
+      p1.y - p0.y;
 
     ctx.save();
 
-    // Sheet body
-    ctx.fillStyle = "#c7ccd1";
-    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle =
+      "#d8d8d8";
 
-    // Sheet border
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x, y, w, h);
+    ctx.fillRect(
+      x,
+      y,
+      w,
+      h
+    );
+
+    ctx.strokeStyle =
+      "#ffffff";
+
+    ctx.lineWidth =
+      2;
+
+    ctx.strokeRect(
+      x,
+      y,
+      w,
+      h
+    );
 
     ctx.restore();
   }
 
-  function drawSheetGrid(sheetWidth, sheetHeight) {
-    var x = offsetX;
-    var y = offsetY;
-    var w = sheetWidth * scale;
-    var h = sheetHeight * scale;
+
+  /* =========================================================
+     GRID
+     ========================================================= */
+
+  function drawGrid(
+    data
+  ) {
+
+    var sheet =
+      data.sheet;
+
+    if (!sheet) {
+      return;
+    }
+
+    var maxX =
+      num(
+        sheet.widthInch
+      );
+
+    var maxY =
+      num(
+        sheet.heightInch
+      );
 
     ctx.save();
-    ctx.strokeStyle = "rgba(60,70,80,0.15)";
-    ctx.lineWidth = 1;
 
-    var grid = scale;
-    if (grid < 20) { ctx.restore(); return; }
+    ctx.strokeStyle =
+      "rgba(0,0,0,0.10)";
 
-    for (var gx = x + grid; gx < x + w; gx += grid) {
+    ctx.lineWidth =
+      1;
+
+    /*
+       1 inch grid
+    */
+
+    for (
+      var x = 1;
+      x < maxX;
+      x++
+    ) {
+
+      var a =
+        sheetToCanvas(
+          x,
+          0,
+          data
+        );
+
+      var b =
+        sheetToCanvas(
+          x,
+          maxY,
+          data
+        );
+
       ctx.beginPath();
-      ctx.moveTo(gx, y);
-      ctx.lineTo(gx, y + h);
+
+      ctx.moveTo(
+        a.x,
+        a.y
+      );
+
+      ctx.lineTo(
+        b.x,
+        b.y
+      );
+
       ctx.stroke();
     }
 
-    for (var gy = y + grid; gy < y + h; gy += grid) {
+
+    for (
+      var y = 1;
+      y < maxY;
+      y++
+    ) {
+
+      var c =
+        sheetToCanvas(
+          0,
+          y,
+          data
+        );
+
+      var d =
+        sheetToCanvas(
+          maxX,
+          y,
+          data
+        );
+
       ctx.beginPath();
-      ctx.moveTo(x, gy);
-      ctx.lineTo(x + w, gy);
+
+      ctx.moveTo(
+        c.x,
+        c.y
+      );
+
+      ctx.lineTo(
+        d.x,
+        d.y
+      );
+
       ctx.stroke();
     }
 
     ctx.restore();
   }
+
 
   /* =========================================================
      MARKING LINES
      ========================================================= */
 
-  function drawMarkingLines(data, sheetWidth, sheetHeight) {
-    var x0 = offsetX;
-    var y0 = offsetY;
+  function drawMarkingLines(
+    data
+  ) {
 
-    var lengthLines = Array.isArray(data.lengthLines) ? data.lengthLines : [];
-    var depthLines = Array.isArray(data.depthLines) ? data.depthLines : [];
+    var lengthLines =
+      data.flat &&
+      data.flat.lengthLines
+        ? data.flat.lengthLines
+        : [];
 
-    // -----------------------------------------------------
-    // LENGTH LINES (Vertical)
-    // -----------------------------------------------------
+    var depthLines =
+      data.flat &&
+      data.flat.depthLines
+        ? data.flat.depthLines
+        : [];
 
-    var runningX = 0;
 
-    for (var i = 0; i < lengthLines.length; i++) {
-      var line = lengthLines[i];
-      var size = num(line.sizeInch, num(line.size, 0));
+    /*
+       LENGTH BENDS
+       vertical
+    */
 
-      if (size <= 0) continue;
+    lengthLines.forEach(
+      function (line) {
 
-      runningX += size;
+        if (
+          !line.isBend
+        ) {
+          return;
+        }
 
-      var x = x0 + runningX * scale;
+        var x =
+          line.bendCenterInch;
 
-      drawVerticalMark(x, y0, y0 + sheetHeight * scale, line, i + 1);
-    }
+        /*
+           If this bend is replaced
+           by a physical cup cut,
+           don't draw the blue line
+           through the cut area.
+        */
 
-    // -----------------------------------------------------
-    // DEPTH LINES (Horizontal)
-    // -----------------------------------------------------
+        var cut =
+          findCutForLengthLine(
+            data,
+            line.id
+          );
 
-    var runningY = 0;
+        if (cut) {
 
-    for (var j = 0; j < depthLines.length; j++) {
-      var dline = depthLines[j];
-      var dsize = num(dline.sizeInch, num(dline.size, 0));
+          drawVerticalBendWithCut(
+            x,
+            cut,
+            data,
+            line
+          );
 
-      if (dsize <= 0) continue;
+        } else {
 
-      runningY += dsize;
-
-      var y = y0 + runningY * scale;
-
-      drawHorizontalMark(y, x0, x0 + sheetWidth * scale, dline, j + 1);
-    }
-  }
-
-  function drawVerticalMark(x, y1, y2, line, index) {
-    ctx.save();
-
-    // Blue dashed line
-    ctx.strokeStyle = "#1677ff";
-    ctx.lineWidth = 2;
-    ctx.setLineDash([8, 5]);
-
-    ctx.beginPath();
-    ctx.moveTo(x, y1);
-    ctx.lineTo(x, y2);
-    ctx.stroke();
-
-    ctx.setLineDash([]);
-
-    // Label
-    ctx.font = "bold 11px Arial";
-    ctx.fillStyle = "#0b4aa2";
-
-    var label = "L" + index + " " + String(line.angle || 90) + "°";
-    ctx.fillText(label, x + 5, y1 + 18);
-
-    // Direction indicator
-    var direction = String(line.direction || "UP").toUpperCase();
-    var dirColor = direction === "DOWN" ? "#dc2626" : "#16a34a";
-    ctx.fillStyle = dirColor;
-    ctx.font = "bold 10px Arial";
-    ctx.fillText(direction, x + 5, y1 + 32);
-
-    ctx.restore();
-  }
-
-  function drawHorizontalMark(y, x1, x2, line, index) {
-    ctx.save();
-
-    // Blue dashed line
-    ctx.strokeStyle = "#1677ff";
-    ctx.lineWidth = 2;
-    ctx.setLineDash([8, 5]);
-
-    ctx.beginPath();
-    ctx.moveTo(x1, y);
-    ctx.lineTo(x2, y);
-    ctx.stroke();
-
-    ctx.setLineDash([]);
-
-    // Label
-    ctx.font = "bold 11px Arial";
-    ctx.fillStyle = "#0b4aa2";
-
-    var label = "D" + index + " " + String(line.angle || 90) + "°";
-    ctx.fillText(label, x1 + 5, y - 7);
-
-    // Direction
-    var direction = String(line.direction || "UP").toUpperCase();
-    var dirColor = direction === "DOWN" ? "#dc2626" : "#16a34a";
-    ctx.fillStyle = dirColor;
-    ctx.font = "bold 10px Arial";
-    ctx.fillText(direction, x1 + 5, y - 20);
-
-    ctx.restore();
-  }
-
-  /* =========================================================
-     BEND JOINTS (Red dots)
-     ========================================================= */
-
-  function drawBendJoints(data, sheetWidth, sheetHeight) {
-    var x0 = offsetX;
-    var y0 = offsetY;
-
-    var lengthLines = Array.isArray(data.lengthLines) ? data.lengthLines : [];
-    var depthLines = Array.isArray(data.depthLines) ? data.depthLines : [];
-
-    // Length joints
-    var runningX = 0;
-    for (var i = 0; i < lengthLines.length; i++) {
-      var size = num(lengthLines[i].sizeInch, num(lengthLines[i].size, 0));
-      if (size <= 0) continue;
-      runningX += size;
-
-      var x = x0 + runningX * scale;
-
-      ctx.save();
-      ctx.fillStyle = "#dc2626";
-      ctx.beginPath();
-      ctx.arc(x, y0, 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-
-    // Depth joints
-    var runningY = 0;
-    for (var j = 0; j < depthLines.length; j++) {
-      var dsize = num(depthLines[j].sizeInch, num(depthLines[j].size, 0));
-      if (dsize <= 0) continue;
-      runningY += dsize;
-
-      var y = y0 + runningY * scale;
-
-      ctx.save();
-      ctx.fillStyle = "#dc2626";
-      ctx.beginPath();
-      ctx.arc(x0, y, 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-  }
-
-  /* =========================================================
-     CUTS
-     ========================================================= */
-
-  function drawCuts(data) {
-    var cuts = Array.isArray(data.cuts) ? data.cuts : [];
-    if (!cuts.length) return;
-
-    for (var i = 0; i < cuts.length; i++) {
-      var cut = cuts[i];
-      if (!cut) continue;
-
-      // Hidden cut?
-      var cutId = cut.id || "";
-      if (
-        window.view3d &&
-        Array.isArray(window.view3d.hiddenCuts) &&
-        window.view3d.hiddenCuts.indexOf(cutId) !== -1
-      ) {
-        continue;
+          drawVerticalBend(
+            x,
+            data,
+            line
+          );
+        }
       }
+    );
 
-      var xIn = num(cut.xInch, 0);
-      var yIn = num(cut.yInch, 0);
-      var widthIn = num(cut.widthInch, 0.1);
-      var depthIn = num(cut.depthInch, 0.1);
 
-      var x = offsetX + xIn * scale;
-      var y = offsetY + yIn * scale;
-      var w = Math.max(4, widthIn * scale);
-      var h = Math.max(4, depthIn * scale);
+    /*
+       DEPTH BENDS
+       horizontal
+    */
 
-      drawSingleCut(x, y, w, h, cut);
-    }
+    depthLines.forEach(
+      function (line) {
+
+        if (
+          !line.isBend
+        ) {
+          return;
+        }
+
+        var y =
+          line.bendCenterInch;
+
+        var cut =
+          findCutForDepthLine(
+            data,
+            line.id
+          );
+
+        if (cut) {
+
+          drawHorizontalBendWithCut(
+            y,
+            cut,
+            data,
+            line
+          );
+
+        } else {
+
+          drawHorizontalBend(
+            y,
+            data,
+            line
+          );
+        }
+      }
+    );
   }
 
-  function drawSingleCut(x, y, w, h, cut) {
+
+  /* =========================================================
+     BLUE BEND LINE
+     ========================================================= */
+
+  function drawVerticalBend(
+    xInch,
+    data,
+    line
+  ) {
+
+    var a =
+      sheetToCanvas(
+        xInch,
+        0,
+        data
+      );
+
+    var b =
+      sheetToCanvas(
+        xInch,
+        data.sheet.heightInch,
+        data
+      );
+
     ctx.save();
 
-    // Red fill
-    ctx.fillStyle = "rgba(220,35,35,0.85)";
-    ctx.fillRect(x - w/2, y - h/2, w, h);
+    ctx.strokeStyle =
+      "#2388ff";
 
-    // White border
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(x - w/2, y - h/2, w, h);
+    ctx.lineWidth =
+      2;
 
-    // X marker
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2;
+    ctx.setLineDash(
+      [8, 6]
+    );
+
     ctx.beginPath();
-    ctx.moveTo(x - w/2, y - h/2);
-    ctx.lineTo(x + w/2, y + h/2);
-    ctx.moveTo(x + w/2, y - h/2);
-    ctx.lineTo(x - w/2, y + h/2);
+
+    ctx.moveTo(
+      a.x,
+      a.y
+    );
+
+    ctx.lineTo(
+      b.x,
+      b.y
+    );
+
     ctx.stroke();
 
-    // CUT label
-    ctx.font = "bold 9px Arial";
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText("CUT", x - w/2 + 2, y - h/2 + 11);
+    ctx.setLineDash([]);
+
+    drawLineLabel(
+      a.x + 5,
+      a.y + 16,
+      line.id +
+      " " +
+      line.angle +
+      "° " +
+      line.direction
+    );
 
     ctx.restore();
   }
+
+
+  function drawHorizontalBend(
+    yInch,
+    data,
+    line
+  ) {
+
+    var a =
+      sheetToCanvas(
+        0,
+        yInch,
+        data
+      );
+
+    var b =
+      sheetToCanvas(
+        data.sheet.widthInch,
+        yInch,
+        data
+      );
+
+    ctx.save();
+
+    ctx.strokeStyle =
+      "#2388ff";
+
+    ctx.lineWidth =
+      2;
+
+    ctx.setLineDash(
+      [8, 6]
+    );
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      a.x,
+      a.y
+    );
+
+    ctx.lineTo(
+      b.x,
+      b.y
+    );
+
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+
+    drawLineLabel(
+      a.x + 5,
+      a.y + 16,
+      line.id +
+      " " +
+      line.angle +
+      "° " +
+      line.direction
+    );
+
+    ctx.restore();
+  }
+
+
+  /* =========================================================
+     BEND + CUT
+     ---------------------------------------------------------
+     RED CUT REPLACES BLUE LINE.
+     ========================================================= */
+
+  function drawVerticalBendWithCut(
+    xInch,
+    cut,
+    data,
+    line
+  ) {
+
+    var top =
+      sheetToCanvas(
+        xInch,
+        0,
+        data
+      );
+
+    var bottom =
+      sheetToCanvas(
+        xInch,
+        data.sheet.heightInch,
+        data
+      );
+
+    var center =
+      sheetToCanvas(
+        cut.xInch,
+        cut.yInch,
+        data
+      );
+
+    var cutDepthInch =
+      num(
+        cut.depthInch,
+        0
+      );
+
+    var cutHalf =
+      cutDepthInch / 2;
+
+    var y1 =
+      sheetToCanvas(
+        xInch,
+        Math.max(
+          0,
+          cut.yInch -
+          cutHalf
+        ),
+        data
+      );
+
+    var y2 =
+      sheetToCanvas(
+        xInch,
+        Math.min(
+          data.sheet.heightInch,
+          cut.yInch +
+          cutHalf
+        ),
+        data
+      );
+
+
+    ctx.save();
+
+    ctx.strokeStyle =
+      "#2388ff";
+
+    ctx.lineWidth =
+      2;
+
+    ctx.setLineDash(
+      [8, 6]
+    );
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      top.x,
+      top.y
+    );
+
+    ctx.lineTo(
+      y1.x,
+      y1.y
+    );
+
+    ctx.moveTo(
+      y2.x,
+      y2.y
+    );
+
+    ctx.lineTo(
+      bottom.x,
+      bottom.y
+    );
+
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+
+    /*
+       RED PHYSICAL CUT
+    */
+
+    drawCutShape(
+      cut,
+      data
+    );
+
+    ctx.restore();
+  }
+
+
+  function drawHorizontalBendWithCut(
+    yInch,
+    cut,
+    data,
+    line
+  ) {
+
+    var left =
+      sheetToCanvas(
+        0,
+        yInch,
+        data
+      );
+
+    var right =
+      sheetToCanvas(
+        data.sheet.widthInch,
+        yInch,
+        data
+      );
+
+    var cutDepthInch =
+      num(
+        cut.depthInch,
+        0
+      );
+
+    var cutHalf =
+      cutDepthInch / 2;
+
+    var x1 =
+      sheetToCanvas(
+        Math.max(
+          0,
+          cut.xInch -
+          cutHalf
+        ),
+        yInch,
+        data
+      );
+
+    var x2 =
+      sheetToCanvas(
+        Math.min(
+          data.sheet.widthInch,
+          cut.xInch +
+          cutHalf
+        ),
+        yInch,
+        data
+      );
+
+
+    ctx.save();
+
+    ctx.strokeStyle =
+      "#2388ff";
+
+    ctx.lineWidth =
+      2;
+
+    ctx.setLineDash(
+      [8, 6]
+    );
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      left.x,
+      left.y
+    );
+
+    ctx.lineTo(
+      x1.x,
+      x1.y
+    );
+
+    ctx.moveTo(
+      x2.x,
+      x2.y
+    );
+
+    ctx.lineTo(
+      right.x,
+      right.y
+    );
+
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+
+    drawCutShape(
+      cut,
+      data
+    );
+
+    ctx.restore();
+  }
+
+
+  /* =========================================================
+     FIND CUTS
+     ========================================================= */
+
+  function findCutForLengthLine(
+    data,
+    id
+  ) {
+
+    var cuts =
+      data.cuts || [];
+
+    for (
+      var i = 0;
+      i < cuts.length;
+      i++
+    ) {
+
+      if (
+        cuts[i].lengthId === id &&
+        !isCutHidden(cuts[i])
+      ) {
+        return cuts[i];
+      }
+    }
+
+    return null;
+  }
+
+
+  function findCutForDepthLine(
+    data,
+    id
+  ) {
+
+    var cuts =
+      data.cuts || [];
+
+    for (
+      var i = 0;
+      i < cuts.length;
+      i++
+    ) {
+
+      if (
+        cuts[i].depthId === id &&
+        !isCutHidden(cuts[i])
+      ) {
+        return cuts[i];
+      }
+    }
+
+    return null;
+  }
+
+
+  function isCutHidden(cut) {
+
+    if (!cut) {
+      return false;
+    }
+
+    if (cut.hidden) {
+      return true;
+    }
+
+    var hidden =
+      window.hiddenCuts ||
+      {};
+
+    return !!hidden[
+      cut.id
+    ];
+  }
+
+
+  /* =========================================================
+     CUT SHAPE
+     ========================================================= */
+
+  function drawCutShape(
+    cut,
+    data
+  ) {
+
+    if (
+      !cut ||
+      isCutHidden(cut)
+    ) {
+      return;
+    }
+
+    var x =
+      num(cut.xInch);
+
+    var y =
+      num(cut.yInch);
+
+    var width =
+      num(cut.widthInch);
+
+    var depth =
+      num(cut.depthInch);
+
+
+    var p1 =
+      sheetToCanvas(
+        x - width / 2,
+        y - depth / 2,
+        data
+      );
+
+    var p2 =
+      sheetToCanvas(
+        x + width / 2,
+        y + depth / 2,
+        data
+      );
+
+    var w =
+      p2.x - p1.x;
+
+    var h =
+      p2.y - p1.y;
+
+
+    ctx.save();
+
+    /*
+       Red = physical cup cut
+    */
+
+    ctx.fillStyle =
+      "rgba(220,40,40,0.85)";
+
+    ctx.strokeStyle =
+      "#ff3030";
+
+    ctx.lineWidth =
+      2;
+
+    ctx.fillRect(
+      p1.x,
+      p1.y,
+      w,
+      h
+    );
+
+    ctx.strokeRect(
+      p1.x,
+      p1.y,
+      w,
+      h
+    );
+
+
+    /*
+       X marker
+    */
+
+    ctx.strokeStyle =
+      "#ffffff";
+
+    ctx.lineWidth =
+      1.5;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      p1.x,
+      p1.y
+    );
+
+    ctx.lineTo(
+      p2.x,
+      p2.y
+    );
+
+    ctx.moveTo(
+      p2.x,
+      p1.y
+    );
+
+    ctx.lineTo(
+      p1.x,
+      p2.y
+    );
+
+    ctx.stroke();
+
+
+    /*
+       Label
+    */
+
+    ctx.fillStyle =
+      "#ffffff";
+
+    ctx.font =
+      "bold 11px Arial";
+
+    ctx.fillText(
+      "CUT",
+      p1.x + 4,
+      p1.y + 13
+    );
+
+    ctx.restore();
+  }
+
+
+  /* =========================================================
+     INTERSECTIONS
+     ========================================================= */
+
+  function drawIntersections(
+    data
+  ) {
+
+    var list =
+      data.intersections || [];
+
+    ctx.save();
+
+    list.forEach(
+      function (item) {
+
+        var p =
+          sheetToCanvas(
+            item.xInch,
+            item.yInch,
+            data
+          );
+
+        var required =
+          item.interaction &&
+          item.interaction.required;
+
+        /*
+           If physical cut exists,
+           red cut will represent this point.
+        */
+
+        if (required) {
+          return;
+        }
+
+        ctx.fillStyle =
+          "#ffb400";
+
+        ctx.beginPath();
+
+        ctx.arc(
+          p.x,
+          p.y,
+          3,
+          0,
+          Math.PI * 2
+        );
+
+        ctx.fill();
+      }
+    );
+
+    ctx.restore();
+  }
+
 
   /* =========================================================
      DIMENSIONS
      ========================================================= */
 
-  function drawDimensions(sheetWidth, sheetHeight) {
-    var x = offsetX;
-    var y = offsetY;
-    var w = sheetWidth * scale;
-    var h = sheetHeight * scale;
+  function drawDimensions(
+    data
+  ) {
 
-    // Top width
-    drawHorizontalDimension(
-      x, y - 20, x + w, y - 20,
-      formatInch(sheetWidth)
-    );
+    var sheet =
+      data.sheet;
 
-    // Left height
-    drawVerticalDimension(
-      x - 25, y, x - 25, y + h,
-      formatInch(sheetHeight)
-    );
-  }
+    if (!sheet) {
+      return;
+    }
 
-  function drawHorizontalDimension(x1, y1, x2, y2, label) {
+    var pLeft =
+      sheetToCanvas(
+        0,
+        sheet.heightInch,
+        data
+      );
+
+    var pRight =
+      sheetToCanvas(
+        sheet.widthInch,
+        sheet.heightInch,
+        data
+      );
+
+    var pTop =
+      sheetToCanvas(
+        0,
+        0,
+        data
+      );
+
     ctx.save();
-    ctx.strokeStyle = "#8899aa";
-    ctx.fillStyle = "#ffffff";
-    ctx.lineWidth = 1;
 
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.stroke();
+    ctx.fillStyle =
+      "#111111";
 
-    drawArrow(x1, y1, 0);
-    drawArrow(x2, y2, Math.PI);
+    ctx.font =
+      "bold 12px Arial";
 
-    ctx.font = "bold 12px Arial";
-    var middle = (x1 + x2) / 2;
-    ctx.fillText(label, middle - 20, y1 - 5);
+    ctx.textAlign =
+      "center";
+
+    ctx.fillText(
+      formatSize(
+        sheet.widthInch
+      ),
+      (
+        pLeft.x +
+        pRight.x
+      ) / 2,
+      pLeft.y + 25
+    );
+
+    ctx.textAlign =
+      "left";
+
+    ctx.fillText(
+      formatSize(
+        sheet.heightInch
+      ),
+      pTop.x - 5,
+      (
+        pTop.y +
+        pLeft.y
+      ) / 2
+    );
 
     ctx.restore();
   }
 
-  function drawVerticalDimension(x1, y1, x2, y2, label) {
+
+  function formatSize(
+    inch
+  ) {
+
+    if (
+      window.Core &&
+      typeof window.Core.formatInch ===
+      "function"
+    ) {
+
+      return window.Core.formatInch(
+        inch
+      );
+    }
+
+    return (
+      Math.round(
+        num(inch) * 16
+      ) / 16
+    ) + '"';
+  }
+
+
+  /* =========================================================
+     LINE LABEL
+     ========================================================= */
+
+  function drawLineLabel(
+    x,
+    y,
+    text
+  ) {
+
     ctx.save();
-    ctx.strokeStyle = "#8899aa";
-    ctx.fillStyle = "#ffffff";
-    ctx.lineWidth = 1;
 
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.stroke();
+    ctx.fillStyle =
+      "#0758b5";
 
-    drawArrow(x1, y1, Math.PI / 2);
-    drawArrow(x2, y2, -Math.PI / 2);
+    ctx.font =
+      "bold 11px Arial";
 
-    ctx.save();
-    ctx.translate(x1 - 7, (y1 + y2) / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.font = "bold 12px Arial";
-    ctx.fillText(label, -20, 0);
-    ctx.restore();
+    ctx.fillText(
+      text,
+      x,
+      y
+    );
 
     ctx.restore();
   }
 
-  function drawArrow(x, y, angle) {
-    var size = 6;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(
-      x - Math.cos(angle - 0.5) * size,
-      y - Math.sin(angle - 0.5) * size
-    );
-    ctx.lineTo(
-      x - Math.cos(angle + 0.5) * size,
-      y - Math.sin(angle + 0.5) * size
-    );
-    ctx.closePath();
-    ctx.fill();
-  }
 
   /* =========================================================
      LEGEND
      ========================================================= */
 
-  function drawLegend(data) {
-    var w = canvas.clientWidth || canvas.width;
-    var h = canvas.clientHeight || canvas.height;
+  function drawLegend(
+    data
+  ) {
 
-    var x = 10;
-    var y = h - 85;
+    var cuts =
+      data.cuts || [];
+
+    var bends =
+      data.totals
+        ? data.totals.totalBends
+        : 0;
 
     ctx.save();
-    ctx.font = "11px Arial";
 
-    // Blue - Marking
-    ctx.strokeStyle = "#1677ff";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + 25, y);
-    ctx.stroke();
+    ctx.font =
+      "11px Arial";
 
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText("Bend / Mark", x + 32, y + 4);
+    ctx.fillStyle =
+      "#222222";
 
-    // Red dot - Joint
-    y += 20;
-    ctx.fillStyle = "#dc2626";
-    ctx.beginPath();
-    ctx.arc(x + 12, y - 3, 5, 0, Math.PI * 2);
-    ctx.fill();
+    var x = 15;
+    var y = 20;
 
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText("Bend Joint", x + 32, y + 4);
-
-    // Red box - Cut
-    y += 20;
-    ctx.fillStyle = "#dc2323";
-    ctx.fillRect(x, y - 8, 25, 12);
-
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText("Cup Cut", x + 32, y + 3);
-
-    // Summary
-    y += 22;
-
-    var lenCount = data.lengthLines ? data.lengthLines.length : 0;
-    var depCount = data.depthLines ? data.depthLines.length : 0;
-    var cutCount = data.cuts ? data.cuts.length : 0;
-
-    ctx.fillStyle = "#fbbf24";
-    ctx.font = "bold 11px Arial";
     ctx.fillText(
-      "L: " + lenCount + " | D: " + depCount + " | Cuts: " + cutCount,
-      x, y
+      "MASTER FLAT",
+      x,
+      y
+    );
+
+    y += 17;
+
+    ctx.fillStyle =
+      "#2388ff";
+
+    ctx.fillText(
+      "BEND / MARK",
+      x,
+      y
+    );
+
+    y += 16;
+
+    ctx.fillStyle =
+      "#d82020";
+
+    ctx.fillText(
+      "CUP CUT: " +
+      cuts.length,
+      x,
+      y
+    );
+
+    y += 16;
+
+    ctx.fillStyle =
+      "#222222";
+
+    ctx.fillText(
+      "BENDS: " +
+      bends,
+      x,
+      y
     );
 
     ctx.restore();
   }
 
-  /* =========================================================
-     EMPTY MESSAGE
-     ========================================================= */
-
-  function drawEmpty(width, height, message) {
-    ctx.save();
-    ctx.fillStyle = "#9aa3ad";
-    ctx.font = "bold 15px Arial";
-    ctx.textAlign = "center";
-    ctx.fillText(message, width / 2, height / 2);
-    ctx.restore();
-  }
 
   /* =========================================================
-     FIT TO SCREEN
+     CUT HIT TEST
      ========================================================= */
 
-  function fit() {
-    var data = getMasterData();
-    if (!data) return;
+  function toggleCutAtPoint(
+    clientX,
+    clientY
+  ) {
 
-    var sheetWidth = 0;
-    var sheetHeight = 0;
-
-    if (data.sheet) {
-      sheetWidth = num(data.sheet.widthInch, num(data.sheet.width, 0));
-      sheetHeight = num(data.sheet.heightInch, num(data.sheet.height, 0));
-    }
-
-    if (sheetWidth <= 0 || sheetHeight <= 0) {
-      if (data.totals) {
-        sheetWidth = num(data.totals.length, num(data.totals.lengthInch, 0));
-        sheetHeight = num(data.totals.depth, num(data.totals.depthInch, 0));
-      }
-    }
-
-    if (sheetWidth <= 0 || sheetHeight <= 0) {
-      draw();
+    if (!masterData) {
       return;
     }
 
-    var width = canvas.clientWidth || 320;
-    var height = canvas.clientHeight || 420;
+    var rect =
+      canvas.getBoundingClientRect();
 
-    var availableWidth = Math.max(width - 100, 100);
-    var availableHeight = Math.max(height - 120, 100);
+    var px =
+      clientX -
+      rect.left;
 
-    var sx = availableWidth / Math.max(sheetWidth, 1);
-    var sy = availableHeight / Math.max(sheetHeight, 1);
+    var py =
+      clientY -
+      rect.top;
 
-    scale = Math.min(sx, sy);
-    scale = Math.max(minScale, Math.min(maxScale, scale));
+    var cuts =
+      masterData.cuts || [];
 
-    offsetX = (width - sheetWidth * scale) / 2;
-    offsetY = (height - sheetHeight * scale) / 2;
-    offsetY = Math.max(offsetY, 60);
+    for (
+      var i = 0;
+      i < cuts.length;
+      i++
+    ) {
+
+      var cut =
+        cuts[i];
+
+      var p1 =
+        sheetToCanvas(
+          cut.xInch -
+          cut.widthInch / 2,
+          cut.yInch -
+          cut.depthInch / 2,
+          masterData
+        );
+
+      var p2 =
+        sheetToCanvas(
+          cut.xInch +
+          cut.widthInch / 2,
+          cut.yInch +
+          cut.depthInch / 2,
+          masterData
+        );
+
+      if (
+        px >= p1.x &&
+        px <= p2.x &&
+        py >= p1.y &&
+        py <= p2.y
+      ) {
+
+        if (
+          !window.hiddenCuts
+        ) {
+
+          window.hiddenCuts = {};
+        }
+
+        window.hiddenCuts[
+          cut.id
+        ] =
+          !window.hiddenCuts[
+            cut.id
+          ];
+
+        if (
+          window.view3d
+        ) {
+
+          window.view3d.hiddenCuts =
+            window.hiddenCuts;
+        }
+
+        draw();
+
+        return;
+      }
+    }
+  }
+
+
+  /* =========================================================
+     FIT
+     ========================================================= */
+
+  function fit() {
+
+    if (!window.flatView) {
+
+      window.flatView = {
+        zoom: 1,
+        panX: 0,
+        panY: 0
+      };
+    }
+
+    window.flatView.zoom =
+      1;
+
+    window.flatView.panX =
+      0;
+
+    window.flatView.panY =
+      0;
 
     draw();
   }
+
+
+  /* =========================================================
+     RESET
+     ========================================================= */
+
+  function reset() {
+
+    fit();
+  }
+
 
   /* =========================================================
      ZOOM
      ========================================================= */
 
   function zoomIn() {
-    scale *= 1.2;
-    scale = Math.min(maxScale, scale);
+
+    var view =
+      getView();
+
+    view.zoom =
+      Math.min(
+        window.ZOOM_MAX || 20,
+        view.zoom * 1.2
+      );
+
     draw();
   }
+
 
   function zoomOut() {
-    scale *= 0.8;
-    scale = Math.max(minScale, scale);
+
+    var view =
+      getView();
+
+    view.zoom =
+      Math.max(
+        window.ZOOM_MIN || 0.2,
+        view.zoom * 0.8
+      );
+
     draw();
   }
 
-  function reset() {
-    scale = 45;
-    offsetX = 40;
-    offsetY = 60;
-    fit();
-  }
+
+  /* =========================================================
+     PRINT
+     ========================================================= */
 
   function print() {
+
     window.print();
   }
 
+
   /* =========================================================
-     EXPOSE
+     PUBLIC API
      ========================================================= */
 
   window.FlatView = {
-    init: init,
-    draw: draw,
-    fit: fit,
-    zoomIn: zoomIn,
-    zoomOut: zoomOut,
-    reset: reset,
-    print: print
+
+    init:
+      init,
+
+    draw:
+      draw,
+
+    resize:
+      resize,
+
+    fit:
+      fit,
+
+    reset:
+      reset,
+
+    zoomIn:
+      zoomIn,
+
+    zoomOut:
+      zoomOut,
+
+    print:
+      print,
+
+    getMasterData:
+      getMasterData
   };
 
-  window.Flat = window.FlatView;
+
+  /*
+     Existing sheet.js calls:
+
+       window.Flat.draw()
+
+     Keep compatibility.
+  */
+
+  window.Flat =
+    window.FlatView;
+
+
+  console.log(
+    "Flat View V7 loaded"
+  );
 
 })();
+
+Abhi "3d.js" aur "result.js" mat change karna. Pehle ye "flat.js" paste karke test karenge. Agar page load hota hai aur Input/View open hota hai, uske baad next "3d.js" karenge.
