@@ -1934,4 +1934,3 @@
 
 })();
 
-Abhi "3d.js" aur "result.js" mat change karna. Pehle ye "flat.js" paste karke test karenge. Agar page load hota hai aur Input/View open hota hai, uske baad next "3d.js" karenge.
