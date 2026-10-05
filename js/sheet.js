@@ -1,8 +1,13 @@
 /* =========================================================
-   SHEET.JS — INPUT / MARKING LINE CONTROLLER V6
+   SHEET.JS — INPUT / MARKING LINE CONTROLLER V7
    ---------------------------------------------------------
    Keypad is created automatically because index.html
    contains empty #calc-grid and #frac-grid containers.
+
+   V7 CHANGE:
+   - Keypad ab STARTUP par band rahega.
+   - User "Current Size" (0) par CLICK karega tabhi khulega.
+   - Keypad ke bahar click karne par BAND ho jayega.
    ========================================================= */
 
 (function () {
@@ -156,10 +161,6 @@
 
     if (!text) return 0;
 
-    /*
-      15 5/8
-    */
-
     var mixed = text.match(
       /^(-?\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)$/
     );
@@ -181,10 +182,6 @@
         );
       }
     }
-
-    /*
-      5/8
-    */
 
     var fraction = text.match(
       /^(-?\d+)\s*\/\s*(\d+)$/
@@ -332,6 +329,12 @@
         frac.appendChild(btn);
       }
     );
+
+    /* -----------------------------------------
+       DEFAULT: KEYPAD BAND RAKHO
+       ----------------------------------------- */
+
+    closeSizeCalculator();
   }
 
   /* =========================================================
@@ -370,11 +373,19 @@
     var frac = $("frac-grid");
 
     if (calc) {
+      calc.style.display = "none";
       calc.classList.remove("open");
     }
 
     if (frac) {
+      frac.style.display = "none";
       frac.classList.remove("open");
+    }
+
+    var display = $("display");
+
+    if (display) {
+      display.classList.remove("active");
     }
   }
 
@@ -399,12 +410,6 @@
       setInputText(value);
       return;
     }
-
-    /*
-      Agar fraction ke baad number
-      press kiya gaya ho to simple
-      number continue kare.
-    */
 
     var next = text + value;
 
@@ -484,12 +489,6 @@
       whole = 0;
     }
 
-    /*
-      Example:
-      15 + 5/8
-      = 15.625
-    */
-
     var result =
       whole + value;
 
@@ -513,7 +512,8 @@
 
     updateSideUI();
     clearInput();
-    openSizeCalculator();
+    // NOTE: Yahan keypad NAHI khulega.
+    // User ko "Current Size" par click karna padega.
   }
 
   function updateSideUI() {
@@ -1447,7 +1447,9 @@
         };
     }
 
-    /* Current Size tap */
+    /* -----------------------------------------
+       CURRENT SIZE (0) PAR CLICK -> KEYPAD OPEN
+       ----------------------------------------- */
 
     var display =
       $("display");
@@ -1455,12 +1457,14 @@
     if (display) {
 
       display.onclick =
-        function () {
+        function (e) {
+          e.stopPropagation();
           openSizeCalculator();
         };
 
       display.ontouchstart =
-        function () {
+        function (e) {
+          e.stopPropagation();
           openSizeCalculator();
         };
     }
@@ -1546,6 +1550,35 @@
           setDirectionUI("DOWN");
         };
     }
+
+    /* -----------------------------------------
+       KEYPAD KE BAHAR CLICK -> KEYPAD BAND
+       ----------------------------------------- */
+
+    document.addEventListener(
+      "click",
+      function (e) {
+
+        var calc = $("calc-grid");
+        var frac = $("frac-grid");
+        var display = $("display");
+
+        if (!calc || !frac || !display) return;
+
+        // Agar keypad pehle se band hai toh kuch mat karo
+        if (calc.style.display === "none") return;
+
+        // Click keypad ke andar hua?
+        if (calc.contains(e.target)) return;
+        if (frac.contains(e.target)) return;
+
+        // Click display par hua?
+        if (display.contains(e.target)) return;
+
+        // Warna keypad band kar do
+        closeSizeCalculator();
+      }
+    );
   }
 
   /* =========================================================
@@ -1625,10 +1658,11 @@
       render();
 
       /*
-        Calculator automatically visible.
+        Calculator STARTUP par BAND rahega.
+        (buildCalculator ke andar closeSizeCalculator call hai)
       */
 
-      openSizeCalculator();
+      closeSizeCalculator();
 
     } catch (err) {
 
