@@ -1,724 +1,1868 @@
 /* =========================================================
-   3D VIEW — MASTER GEOMETRY V6 (FULL 3D BOX)
+   3D.JS
+   MASTER CONNECTED SHEET VIEW V7
    ---------------------------------------------------------
-   FIX V6:
-   - GeometryEngine.threeD.records use karta hai
-   - Ab poora 3D box banata hai (Length + Depth dono)
-   - Har leg ke liye sheet strip + bend joints
-   - Cup cuts bhi draw karta hai
+   GeometryEngine = BRAIN
+   ThreeD = VISUAL SIMULATOR
+
+   IMPORTANT:
+   This file does NOT calculate bend allowance,
+   bend deduction, angle or cup-cut decisions.
+
+   Everything comes from:
+       GeometryEngine.analyze()
+
+   3D responsibilities:
+       - build connected sheet panels
+       - show thickness
+       - show bend direction
+       - show bend radius visually
+       - show cup-cut positions
+       - rotate / zoom
+       - wireframe
+       - auto rotate
+
    ========================================================= */
 
 (function () {
+
   "use strict";
+
+
+  /* =========================================================
+     THREE.JS STATE
+     ========================================================= */
 
   var scene = null;
   var camera = null;
   var renderer = null;
-  var meshGroup = null;
-  var canvasEl = null;
 
-  var ready = false;
-  var currentView = "complete";
+  var canvas3dEl = null;
 
-  var isDragging = false;
-  var lastX = 0;
-  var lastY = 0;
+  var masterGroup = null;
+  var sheetGroup = null;
+  var bendGroup = null;
+  var cutGroup = null;
+  var helperGroup = null;
 
-  var SCALE = 100;
+  var animationId = null;
 
-  function getEl(id) {
+  var initialized = false;
+
+  var masterData = null;
+
+
+  /* =========================================================
+     HELPERS
+     ========================================================= */
+
+  function $(id) {
     return document.getElementById(id);
   }
 
-  function num(value, fallback) {
-    var n = Number(value);
-    return isFinite(n) ? n : fallback;
+
+  function num(v, fallback) {
+
+    var n =
+      parseFloat(v);
+
+    return Number.isFinite(n)
+      ? n
+      : (fallback || 0);
   }
 
-  function degToRad(deg) {
-    return deg * Math.PI / 180;
+
+  function mmTo3D(mm) {
+
+    /*
+       Visual scale.
+
+       10 Three.js units ≈ 1 inch
+       because fabrication dimensions are
+       primarily inch based.
+    */
+
+    return num(mm) *
+      0.3937007874 *
+      10;
   }
 
-  function clearGroup(group) {
-    if (!group) return;
 
-    while (group.children.length) {
-      var obj = group.children[0];
-      group.remove(obj);
+  function inchTo3D(inch) {
 
-      if (obj.geometry) obj.geometry.dispose();
-      if (obj.material) {
-        if (Array.isArray(obj.material)) {
-          obj.material.forEach(function (m) {
-            if (m) m.dispose();
-          });
-        } else {
-          obj.material.dispose();
-        }
-      }
-    }
+    return num(inch) * 10;
   }
+
+
+  function getState() {
+
+    return (
+      window.AppState ||
+      window.state ||
+      {}
+    );
+  }
+
 
   /* =========================================================
-     SETUP
-     ========================================================= */
-
-  function setup3D() {
-    if (ready) return;
-
-    canvasEl = getEl("canvas3d");
-    if (!canvasEl) return;
-
-    if (typeof THREE === "undefined") {
-      console.error("Three.js not loaded.");
-      return;
-    }
-
-    var width = canvasEl.clientWidth || 320;
-    var height = canvasEl.clientHeight || 320;
-
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0d14);
-
-    camera = new THREE.PerspectiveCamera(
-      45,
-      width / height,
-      0.1,
-      100000
-    );
-
-    renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: true
-    });
-
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.setSize(width, height);
-
-    canvasEl.innerHTML = "";
-    canvasEl.appendChild(renderer.domElement);
-
-    meshGroup = new THREE.Group();
-    scene.add(meshGroup);
-
-    var ambient = new THREE.AmbientLight(0xffffff, 0.75);
-    scene.add(ambient);
-
-    var light1 = new THREE.DirectionalLight(0xffffff, 1.0);
-    light1.position.set(1, 2, 3);
-    scene.add(light1);
-
-    var light2 = new THREE.DirectionalLight(0xffffff, 0.5);
-    light2.position.set(-2, 1, -2);
-    scene.add(light2);
-
-    bindEvents();
-
-    ready = true;
-    updateCamera();
-    animate();
-  }
-
-  /* =========================================================
-     EVENTS
-     ========================================================= */
-
-  function bindEvents() {
-    if (!canvasEl) return;
-
-    canvasEl.addEventListener("mousedown", function (e) {
-      isDragging = true;
-      lastX = e.clientX;
-      lastY = e.clientY;
-    });
-
-    canvasEl.addEventListener("mousemove", function (e) {
-      if (!isDragging) return;
-
-      var dx = e.clientX - lastX;
-      var dy = e.clientY - lastY;
-
-      window.view3d.rotY += dx * 0.5;
-      window.view3d.rotX += dy * 0.5;
-
-      window.view3d.rotX = Math.max(-90, Math.min(90, window.view3d.rotX));
-
-      lastX = e.clientX;
-      lastY = e.clientY;
-    });
-
-    canvasEl.addEventListener("mouseup", function () {
-      isDragging = false;
-    });
-
-    canvasEl.addEventListener("mouseleave", function () {
-      isDragging = false;
-    });
-
-    canvasEl.addEventListener(
-      "touchstart",
-      function (e) {
-        if (e.touches.length !== 1) return;
-        isDragging = true;
-        lastX = e.touches[0].clientX;
-        lastY = e.touches[0].clientY;
-      },
-      { passive: true }
-    );
-
-    canvasEl.addEventListener(
-      "touchmove",
-      function (e) {
-        if (!isDragging) return;
-        if (e.touches.length !== 1) return;
-
-        e.preventDefault();
-
-        var dx = e.touches[0].clientX - lastX;
-        var dy = e.touches[0].clientY - lastY;
-
-        window.view3d.rotY += dx * 0.5;
-        window.view3d.rotX += dy * 0.5;
-
-        window.view3d.rotX = Math.max(-90, Math.min(90, window.view3d.rotX));
-
-        lastX = e.touches[0].clientX;
-        lastY = e.touches[0].clientY;
-      },
-      { passive: false }
-    );
-
-    canvasEl.addEventListener("touchend", function () {
-      isDragging = false;
-    });
-
-    canvasEl.addEventListener(
-      "wheel",
-      function (e) {
-        e.preventDefault();
-
-        var factor = e.deltaY > 0 ? 1.12 : 0.88;
-        window.view3d.dist *= factor;
-
-        window.view3d.dist = Math.max(100, Math.min(5000, window.view3d.dist));
-      },
-      { passive: false }
-    );
-
-    window.addEventListener("resize", function () {
-      if (!renderer || !camera) return;
-      resize();
-    });
-  }
-
-  function resize() {
-    if (!canvasEl || !renderer || !camera) return;
-
-    var width = canvasEl.clientWidth;
-    var height = canvasEl.clientHeight;
-
-    if (!width || !height) return;
-
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
-    renderer.setSize(width, height);
-  }
-
-  /* =========================================================
-     MASTER DATA
+     GET MASTER GEOMETRY
      ========================================================= */
 
   function getMasterData() {
-    if (!window.GeometryEngine) {
-      console.error("GeometryEngine not found.");
+
+    if (
+      !window.GeometryEngine ||
+      typeof window.GeometryEngine.analyze !==
+      "function"
+    ) {
+
+      console.error(
+        "3D: GeometryEngine unavailable"
+      );
+
       return null;
     }
 
     try {
-      var state = window.AppState || window.state || {};
-      return window.GeometryEngine.analyze(state);
+
+      masterData =
+        window.GeometryEngine.analyze(
+          getState()
+        );
+
+      return masterData;
+
     } catch (err) {
-      console.error("3D GeometryEngine error:", err);
+
+      console.error(
+        "3D: GeometryEngine failed",
+        err
+      );
+
       return null;
     }
   }
+
+
+  /* =========================================================
+     INIT
+     ========================================================= */
+
+  function init() {
+
+    canvas3dEl =
+      $("canvas3d");
+
+    if (!canvas3dEl) {
+
+      /*
+         Some versions use a container
+         instead of canvas element.
+      */
+
+      canvas3dEl =
+        $("canvas3d-container");
+    }
+
+    if (!canvas3dEl) {
+
+      console.warn(
+        "3D: #canvas3d not found"
+      );
+
+      return;
+    }
+
+
+    if (
+      typeof THREE ===
+      "undefined"
+    ) {
+
+      console.error(
+        "3D: Three.js not loaded"
+      );
+
+      return;
+    }
+
+
+    createScene();
+
+    bindControls();
+
+    initialized = true;
+
+    draw();
+  }
+
+
+  /* =========================================================
+     CREATE SCENE
+     ========================================================= */
+
+  function createScene() {
+
+    scene =
+      new THREE.Scene();
+
+    scene.background =
+      new THREE.Color(
+        0x111318
+      );
+
+
+    var rect =
+      canvas3dEl.getBoundingClientRect();
+
+
+    camera =
+      new THREE.PerspectiveCamera(
+        45,
+        Math.max(
+          1,
+          rect.width
+        ) /
+        Math.max(
+          1,
+          rect.height
+        ),
+        0.1,
+        100000
+      );
+
+
+    camera.position.set(
+      180,
+      150,
+      220
+    );
+
+
+    renderer =
+      new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: false
+      });
+
+
+    renderer.setPixelRatio(
+      window.devicePixelRatio || 1
+    );
+
+    renderer.setSize(
+      Math.max(
+        300,
+        rect.width
+      ),
+      Math.max(
+        300,
+        rect.height
+      )
+    );
+
+
+    /*
+       If #canvas3d is a container,
+       append renderer canvas.
+    */
+
+    if (
+      canvas3dEl.tagName !==
+      "CANVAS"
+    ) {
+
+      canvas3dEl.innerHTML =
+        "";
+
+      canvas3dEl.appendChild(
+        renderer.domElement
+      );
+    }
+
+
+    /*
+       Lighting
+    */
+
+    var ambient =
+      new THREE.AmbientLight(
+        0xffffff,
+        1.5
+      );
+
+    scene.add(
+      ambient
+    );
+
+
+    var key =
+      new THREE.DirectionalLight(
+        0xffffff,
+        2.0
+      );
+
+    key.position.set(
+      300,
+      500,
+      400
+    );
+
+    scene.add(
+      key
+    );
+
+
+    var fill =
+      new THREE.DirectionalLight(
+        0xffffff,
+        1.0
+      );
+
+    fill.position.set(
+      -300,
+      200,
+      -300
+    );
+
+    scene.add(
+      fill
+    );
+
+
+    masterGroup =
+      new THREE.Group();
+
+    sheetGroup =
+      new THREE.Group();
+
+    bendGroup =
+      new THREE.Group();
+
+    cutGroup =
+      new THREE.Group();
+
+    helperGroup =
+      new THREE.Group();
+
+
+    masterGroup.add(
+      sheetGroup
+    );
+
+    masterGroup.add(
+      bendGroup
+    );
+
+    masterGroup.add(
+      cutGroup
+    );
+
+    masterGroup.add(
+      helperGroup
+    );
+
+    scene.add(
+      masterGroup
+    );
+
+
+    /*
+       Ground reference
+    */
+
+    createGround();
+
+
+    window.addEventListener(
+      "resize",
+      resize
+    );
+  }
+
+
+  /* =========================================================
+     GROUND
+     ========================================================= */
+
+  function createGround() {
+
+    var geometry =
+      new THREE.PlaneGeometry(
+        1000,
+        1000
+      );
+
+    var material =
+      new THREE.MeshStandardMaterial({
+        color: 0x17191e,
+        side: THREE.DoubleSide
+      });
+
+    var ground =
+      new THREE.Mesh(
+        geometry,
+        material
+      );
+
+    ground.rotation.x =
+      -Math.PI / 2;
+
+    ground.position.y =
+      -3;
+
+    helperGroup.add(
+      ground
+    );
+
+
+    var grid =
+      new THREE.GridHelper(
+        1000,
+        50
+      );
+
+    grid.position.y =
+      -2.8;
+
+    helperGroup.add(
+      grid
+    );
+  }
+
+
+  /* =========================================================
+     RESIZE
+     ========================================================= */
+
+  function resize() {
+
+    if (
+      !renderer ||
+      !camera ||
+      !canvas3dEl
+    ) {
+      return;
+    }
+
+    var rect =
+      canvas3dEl.getBoundingClientRect();
+
+    var width =
+      Math.max(
+        300,
+        rect.width
+      );
+
+    var height =
+      Math.max(
+        300,
+        rect.height
+      );
+
+    camera.aspect =
+      width / height;
+
+    camera.updateProjectionMatrix();
+
+    renderer.setSize(
+      width,
+      height
+    );
+  }
+
+
+  /* =========================================================
+     CLEAR MASTER
+     ========================================================= */
+
+  function clearMaster() {
+
+    if (sheetGroup) {
+
+      while (
+        sheetGroup.children.length
+      ) {
+
+        sheetGroup.remove(
+          sheetGroup.children[0]
+        );
+      }
+    }
+
+
+    if (bendGroup) {
+
+      while (
+        bendGroup.children.length
+      ) {
+
+        bendGroup.remove(
+          bendGroup.children[0]
+        );
+      }
+    }
+
+
+    if (cutGroup) {
+
+      while (
+        cutGroup.children.length
+      ) {
+
+        cutGroup.remove(
+          cutGroup.children[0]
+        );
+      }
+    }
+  }
+
 
   /* =========================================================
      DRAW
      ========================================================= */
 
   function draw() {
-    if (!ready) setup3D();
-    if (!ready) return;
-
-    clearGroup(meshGroup);
-
-    var data = getMasterData();
-    if (!data) return;
-
-    if (currentView === "reverse") {
-      buildReverseView(data);
-    } else {
-      buildCompleteView(data);
-    }
-
-    updateCamera();
-  }
-
-  /* =========================================================
-     COMPLETE BENT SHEET — FULL 3D BOX
-     ========================================================= */
-
-  function buildCompleteView(data) {
-
-    var records = [];
 
     if (
-      data.threeD &&
-      Array.isArray(data.threeD.records) &&
-      data.threeD.records.length > 0
+      !initialized ||
+      !scene ||
+      !renderer
     ) {
-      records = data.threeD.records;
-    }
-
-    if (records.length === 0) {
-      addEmptyMessage();
       return;
     }
 
-    // -----------------------------------------------------
-    // SAARE POINTS COLLECT KARO (CENTERING KE LIYE)
-    // -----------------------------------------------------
+    var data =
+      getMasterData();
 
-    var allPoints = [];
-
-    records.forEach(function (rec) {
-      if (rec.start) {
-        allPoints.push(new THREE.Vector3(
-          rec.start.x * SCALE,
-          rec.start.y * SCALE,
-          rec.start.z * SCALE
-        ));
-      }
-      if (rec.end) {
-        allPoints.push(new THREE.Vector3(
-          rec.end.x * SCALE,
-          rec.end.y * SCALE,
-          rec.end.z * SCALE
-        ));
-      }
-    });
-
-    if (allPoints.length === 0) {
-      addEmptyMessage();
+    if (!data) {
       return;
     }
 
-    // -----------------------------------------------------
-    // CENTER CALCULATE KARO
-    // -----------------------------------------------------
+    masterData =
+      data;
 
-    var box = new THREE.Box3();
-    allPoints.forEach(function (p) {
-      box.expandByPoint(p);
-    });
+    clearMaster();
 
-    var center = new THREE.Vector3();
-    box.getCenter(center);
-
-    // -----------------------------------------------------
-    // THICKNESS
-    // -----------------------------------------------------
-
-    var thicknessMM = num(
-      data.settings && data.settings.thickness,
-      0.8
+    buildConnectedSheet(
+      data
     );
 
-    var thicknessIn = thicknessMM / 25.4;
-    var thickness = Math.max(thicknessIn * SCALE, 2);
+    buildBendMarkers(
+      data
+    );
 
-    // -----------------------------------------------------
-    // SHEET MATERIAL
-    // -----------------------------------------------------
+    buildPhysicalCuts(
+      data
+    );
 
-    var sheetMaterial = new THREE.MeshStandardMaterial({
-      color: 0xc0c6cc,
-      metalness: 0.85,
-      roughness: 0.25,
-      side: THREE.DoubleSide
-    });
+    applyWireframe();
 
-    // -----------------------------------------------------
-    // HAR RECORD KE LIYE 3D SHEET STRIP BANAO
-    // -----------------------------------------------------
+    fitCamera(
+      data
+    );
 
-    records.forEach(function (rec) {
+    render();
+  }
 
-      if (!rec.start || !rec.end) return;
 
-      var start = new THREE.Vector3(
-        rec.start.x * SCALE - center.x,
-        rec.start.y * SCALE - center.y,
-        rec.start.z * SCALE - center.z
+  /* =========================================================
+     MASTER CONNECTED SHEET
+     ========================================================= */
+
+  function buildConnectedSheet(
+    data
+  ) {
+
+    var sheet =
+      data.sheet;
+
+    if (!sheet) {
+      return;
+    }
+
+
+    var thickness =
+      num(
+        data.settings &&
+        data.settings.thickness,
+        0.8
       );
 
-      var end = new THREE.Vector3(
-        rec.end.x * SCALE - center.x,
-        rec.end.y * SCALE - center.y,
-        rec.end.z * SCALE - center.z
+
+    /*
+       Base flat sheet.
+
+       This is the master developed sheet
+       from GeometryEngine.
+
+       Individual bend panels are created
+       from GeometryEngine line positions.
+    */
+
+    var width =
+      inchTo3D(
+        sheet.widthInch
       );
 
-      var length = start.distanceTo(end);
+    var depth =
+      inchTo3D(
+        sheet.heightInch
+      );
 
-      if (length <= 0) return;
-
-      var sheetWidth = 200;
-      if (rec.side === "length") {
-        sheetWidth = 250;
-      } else {
-        sheetWidth = 150;
-      }
-
-      var midpoint = start.clone().add(end).multiplyScalar(0.5);
-
-      var geometry = new THREE.BoxGeometry(
-        length,
-        sheetWidth,
+    var t =
+      mmTo3D(
         thickness
       );
 
-      var mesh = new THREE.Mesh(
-        geometry,
-        sheetMaterial.clone()
+
+    /*
+       Main sheet.
+
+       It is kept as ONE connected body
+       instead of unrelated boxes.
+    */
+
+    var geometry =
+      new THREE.BoxGeometry(
+        width,
+        t,
+        depth
       );
 
-      mesh.position.copy(midpoint);
-      mesh.lookAt(end);
 
-      meshGroup.add(mesh);
+    var material =
+      new THREE.MeshStandardMaterial({
 
-      // Bend joint
-      var jointGeo = new THREE.SphereGeometry(thickness * 10, 8, 8);
-      var jointMat = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+        color:
+          0xc8cdd2,
 
-      var joint = new THREE.Mesh(jointGeo, jointMat);
-      joint.position.copy(end);
-      meshGroup.add(joint);
+        metalness:
+          0.85,
 
-      // Center line
-      var lineGeo = new THREE.BufferGeometry().setFromPoints([start, end]);
-      var lineMat = new THREE.LineBasicMaterial({ color: 0x4a90e2 });
-      var centerLine = new THREE.Line(lineGeo, lineMat);
-      meshGroup.add(centerLine);
-    });
+        roughness:
+          0.28,
 
-    build3DCuts(data);
-    buildReferenceGridCentered(box);
-  }
-
-  /* =========================================================
-     3D CUTS
-     ========================================================= */
-
-  function build3DCuts(data) {
-    var cuts = Array.isArray(data.cuts) ? data.cuts : [];
-
-    for (var i = 0; i < cuts.length; i++) {
-      var cut = cuts[i];
-      if (!cut) continue;
-
-      var pos = cut.position || {};
-
-      var x = num(pos.x, 0) * SCALE;
-      var y = num(pos.y, 0) * SCALE;
-      var z = 2;
-
-      var width = num(cut.widthIn, num(cut.width, 0.1)) * SCALE;
-      var depth = num(cut.depthIn, num(cut.depth, width / SCALE)) * SCALE;
-
-      width = Math.max(width, 3);
-      depth = Math.max(depth, 3);
-
-      var geometry = new THREE.BoxGeometry(width, depth, 3);
-
-      var material = new THREE.MeshBasicMaterial({
-        color: 0xff0000,
-        transparent: true,
-        opacity: 0.85
+        side:
+          THREE.DoubleSide
       });
 
-      var mesh = new THREE.Mesh(geometry, material);
-      mesh.position.set(x, y, z);
-      meshGroup.add(mesh);
-    }
+
+    var sheetMesh =
+      new THREE.Mesh(
+        geometry,
+        material
+      );
+
+
+    /*
+       Put sheet around origin.
+    */
+
+    sheetMesh.position.set(
+      width / 2,
+      0,
+      depth / 2
+    );
+
+
+    sheetGroup.add(
+      sheetMesh
+    );
+
+
+    /*
+       Add actual bend zones / raised
+       visual panels.
+    */
+
+    buildBendPanels(
+      data,
+      t
+    );
   }
+
 
   /* =========================================================
-     REVERSE / FLAT VIEW
+     BEND PANELS
      ========================================================= */
 
-  function buildReverseView(data) {
-    var sheet = data.sheet;
+  function buildBendPanels(
+    data,
+    thickness3D
+  ) {
 
-    if (!sheet) {
-      addEmptyMessage();
-      return;
+    var lengthLines =
+      data.flat &&
+      data.flat.lengthLines
+        ? data.flat.lengthLines
+        : [];
+
+    var depthLines =
+      data.flat &&
+      data.flat.depthLines
+        ? data.flat.depthLines
+        : [];
+
+
+    /*
+       Length-side bend panels
+    */
+
+    lengthLines.forEach(
+      function (line) {
+
+        if (
+          !line.isBend
+        ) {
+          return;
+        }
+
+        buildLengthPanel(
+          line,
+          data,
+          thickness3D
+        );
+      }
+    );
+
+
+    /*
+       Depth-side bend panels
+    */
+
+    depthLines.forEach(
+      function (line) {
+
+        if (
+          !line.isBend
+        ) {
+          return;
+        }
+
+        buildDepthPanel(
+          line,
+          data,
+          thickness3D
+        );
+      }
+    );
+  }
+
+
+  /* =========================================================
+     LENGTH PANEL
+     ========================================================= */
+
+  function buildLengthPanel(
+    line,
+    data,
+    thickness3D
+  ) {
+
+    var x =
+      inchTo3D(
+        line.bendCenterInch
+      );
+
+    var width =
+      Math.max(
+        1,
+        mmTo3D(
+          Math.max(
+            line.radiusMM,
+            line.thicknessMM
+          )
+        )
+      );
+
+
+    /*
+       Panel visual.
+
+       The center stays connected to
+       the master sheet.
+    */
+
+    var height =
+      Math.max(
+        1,
+        inchTo3D(
+          data.sheet.heightInch
+        )
+      );
+
+
+    var geometry =
+      new THREE.BoxGeometry(
+        width,
+        thickness3D,
+        height
+      );
+
+
+    var material =
+      createSheetMaterial();
+
+
+    var mesh =
+      new THREE.Mesh(
+        geometry,
+        material
+      );
+
+
+    mesh.position.set(
+      x,
+      0,
+      height / 2
+    );
+
+
+    /*
+       UP / DOWN visual orientation.
+
+       This is a visual bend indication.
+    */
+
+    var angle =
+      num(
+        line.effectiveAngle
+      );
+
+    var sign =
+      line.direction === "down"
+        ? -1
+        : 1;
+
+    mesh.rotation.z =
+      sign *
+      angle *
+      Math.PI /
+      180;
+
+
+    sheetGroup.add(
+      mesh
+    );
+  }
+
+
+  /* =========================================================
+     DEPTH PANEL
+     ========================================================= */
+
+  function buildDepthPanel(
+    line,
+    data,
+    thickness3D
+  ) {
+
+    var z =
+      inchTo3D(
+        line.bendCenterInch
+      );
+
+    var width =
+      Math.max(
+        1,
+        mmTo3D(
+          Math.max(
+            line.radiusMM,
+            line.thicknessMM
+          )
+        )
+      );
+
+
+    var sheetWidth =
+      Math.max(
+        1,
+        inchTo3D(
+          data.sheet.widthInch
+        )
+      );
+
+
+    var geometry =
+      new THREE.BoxGeometry(
+        sheetWidth,
+        thickness3D,
+        width
+      );
+
+
+    var material =
+      createSheetMaterial();
+
+
+    var mesh =
+      new THREE.Mesh(
+        geometry,
+        material
+      );
+
+
+    mesh.position.set(
+      sheetWidth / 2,
+      0,
+      z
+    );
+
+
+    var angle =
+      num(
+        line.effectiveAngle
+      );
+
+    var sign =
+      line.direction === "down"
+        ? -1
+        : 1;
+
+    mesh.rotation.x =
+      sign *
+      angle *
+      Math.PI /
+      180;
+
+
+    sheetGroup.add(
+      mesh
+    );
+  }
+
+
+  /* =========================================================
+     SHEET MATERIAL
+     ========================================================= */
+
+  function createSheetMaterial() {
+
+    return new THREE.MeshStandardMaterial({
+
+      color:
+        0xc8cdd2,
+
+      metalness:
+        0.88,
+
+      roughness:
+        0.25,
+
+      side:
+        THREE.DoubleSide
+    });
+  }
+
+
+  /* =========================================================
+     BEND MARKERS
+     ========================================================= */
+
+  function buildBendMarkers(
+    data
+  ) {
+
+    var lines =
+      [];
+
+    if (
+      data.flat &&
+      data.flat.lengthLines
+    ) {
+
+      lines =
+        lines.concat(
+          data.flat.lengthLines
+        );
     }
 
-    var width = num(sheet.widthIn, num(sheet.width, 0));
-    var height = num(sheet.heightIn, num(sheet.height, 0));
+    if (
+      data.flat &&
+      data.flat.depthLines
+    ) {
 
-    if (width <= 0 || height <= 0) {
-      addEmptyMessage();
-      return;
+      lines =
+        lines.concat(
+          data.flat.depthLines
+        );
     }
 
-    width *= SCALE;
-    height *= SCALE;
 
-    var geometry = new THREE.BoxGeometry(width, height, 3);
+    lines.forEach(
+      function (line) {
 
-    var material = new THREE.MeshStandardMaterial({
-      color: 0xbfc5ca,
-      metalness: 0.75,
-      roughness: 0.3,
-      transparent: true,
-      opacity: 0.82,
-      side: THREE.DoubleSide
-    });
+        if (
+          !line.isBend
+        ) {
+          return;
+        }
 
-    var sheetMesh = new THREE.Mesh(geometry, material);
-    sheetMesh.position.set(width / 2, height / 2, 0);
-    meshGroup.add(sheetMesh);
-
-    var lengthLines = Array.isArray(data.lengthLines) ? data.lengthLines : [];
-
-    lengthLines.forEach(function (line) {
-      var pos = num(line.positionInch, num(line.position, 0));
-      if (pos < 0 || pos > width / SCALE) return;
-      var x = pos * SCALE;
-      addFlatLine(x, 0, x, height, 0x2563eb);
-    });
-
-    var depthLines = Array.isArray(data.depthLines) ? data.depthLines : [];
-
-    depthLines.forEach(function (line) {
-      var pos = num(line.positionInch, num(line.position, 0));
-      if (pos < 0 || pos > height / SCALE) return;
-      var y = pos * SCALE;
-      addFlatLine(0, y, width, y, 0x2563eb);
-    });
-
-    buildFlatCuts(data);
-    addRectangleOutline(width, height);
+        buildBendMarker(
+          line,
+          data
+        );
+      }
+    );
   }
 
-  function addFlatLine(x1, y1, x2, y2, color) {
-    var geometry = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(x1, y1, 3),
-      new THREE.Vector3(x2, y2, 3)
-    ]);
 
-    var material = new THREE.LineBasicMaterial({ color: color });
-    var line = new THREE.Line(geometry, material);
-    meshGroup.add(line);
+  function buildBendMarker(
+    line,
+    data
+  ) {
+
+    var material =
+      new THREE.LineBasicMaterial({
+        color: 0xff3030
+      });
+
+
+    var points = [];
+
+
+    if (
+      line.side ===
+      "length"
+    ) {
+
+      var x =
+        inchTo3D(
+          line.bendCenterInch
+        );
+
+      var z1 =
+        0;
+
+      var z2 =
+        inchTo3D(
+          data.sheet.heightInch
+        );
+
+      points.push(
+        new THREE.Vector3(
+          x,
+          2,
+          z1
+        )
+      );
+
+      points.push(
+        new THREE.Vector3(
+          x,
+          2,
+          z2
+        )
+      );
+
+    } else {
+
+      var z =
+        inchTo3D(
+          line.bendCenterInch
+        );
+
+      var x1 =
+        0;
+
+      var x2 =
+        inchTo3D(
+          data.sheet.widthInch
+        );
+
+      points.push(
+        new THREE.Vector3(
+          x1,
+          2,
+          z
+        )
+      );
+
+      points.push(
+        new THREE.Vector3(
+          x2,
+          2,
+          z
+        )
+      );
+    }
+
+
+    var geometry =
+      new THREE.BufferGeometry()
+        .setFromPoints(
+          points
+        );
+
+
+    var lineMesh =
+      new THREE.Line(
+        geometry,
+        material
+      );
+
+
+    bendGroup.add(
+      lineMesh
+    );
+
+
+    /*
+       Bend direction arrow
+    */
+
+    buildDirectionArrow(
+      line,
+      data
+    );
   }
 
-  function buildFlatCuts(data) {
-    var cuts = Array.isArray(data.cuts) ? data.cuts : [];
 
-    cuts.forEach(function (cut) {
-      var pos = cut.position || {};
-      var x = num(pos.x, 0) * SCALE;
-      var y = num(pos.y, 0) * SCALE;
-      var w = num(cut.widthIn, num(cut.width, 0.1)) * SCALE;
-      var h = num(cut.depthIn, num(cut.depth, 0.1)) * SCALE;
+  /* =========================================================
+     DIRECTION ARROW
+     ========================================================= */
 
-      var geometry = new THREE.BoxGeometry(Math.max(w, 4), Math.max(h, 4), 5);
-      var material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-      var mesh = new THREE.Mesh(geometry, material);
-      mesh.position.set(x, y, 5);
-      meshGroup.add(mesh);
-    });
+  function buildDirectionArrow(
+    line,
+    data
+  ) {
+
+    var origin;
+
+    if (
+      line.side ===
+      "length"
+    ) {
+
+      origin =
+        new THREE.Vector3(
+          inchTo3D(
+            line.bendCenterInch
+          ),
+          5,
+          inchTo3D(
+            data.sheet.heightInch / 2
+          )
+        );
+
+    } else {
+
+      origin =
+        new THREE.Vector3(
+          inchTo3D(
+            data.sheet.widthInch / 2
+          ),
+          5,
+          inchTo3D(
+            line.bendCenterInch
+          )
+        );
+    }
+
+
+    var dir =
+      new THREE.Vector3(
+        0,
+        line.direction === "down"
+          ? -1
+          : 1,
+        0
+      );
+
+
+    var arrow =
+      new THREE.ArrowHelper(
+        dir,
+        origin,
+        12,
+        0xff3030,
+        4,
+        2
+      );
+
+
+    bendGroup.add(
+      arrow
+    );
   }
 
-  function addRectangleOutline(width, height) {
-    var pts = [
-      new THREE.Vector3(0, 0, 6),
-      new THREE.Vector3(width, 0, 6),
-      new THREE.Vector3(width, height, 6),
-      new THREE.Vector3(0, height, 6),
-      new THREE.Vector3(0, 0, 6)
+
+  /* =========================================================
+     PHYSICAL CUTS
+     ========================================================= */
+
+  function buildPhysicalCuts(
+    data
+  ) {
+
+    var cuts =
+      data.cuts || [];
+
+
+    cuts.forEach(
+      function (cut) {
+
+        if (
+          isCutHidden(
+            cut
+          )
+        ) {
+          return;
+        }
+
+        buildCut(
+          cut,
+          data
+        );
+      }
+    );
+  }
+
+
+  function buildCut(
+    cut,
+    data
+  ) {
+
+    var width =
+      Math.max(
+        0.5,
+        inchTo3D(
+          cut.widthInch
+        )
+      );
+
+    var depth =
+      Math.max(
+        0.5,
+        inchTo3D(
+          cut.depthInch
+        )
+      );
+
+
+    /*
+       Red transparent physical cut marker.
+
+       NOTE:
+       Three.js does not yet boolean-subtract
+       the sheet in this version.
+
+       This is the master cut location and
+       size from GeometryEngine.
+    */
+
+    var geometry =
+      new THREE.BoxGeometry(
+        width,
+        3,
+        depth
+      );
+
+
+    var material =
+      new THREE.MeshBasicMaterial({
+
+        color:
+          0xff2020,
+
+        transparent:
+          true,
+
+        opacity:
+          0.72,
+
+        depthWrite:
+          false
+      });
+
+
+    var mesh =
+      new THREE.Mesh(
+        geometry,
+        material
+      );
+
+
+    mesh.position.set(
+
+      inchTo3D(
+        cut.xInch
+      ),
+
+      3,
+
+      inchTo3D(
+        cut.yInch
+      )
+    );
+
+
+    cutGroup.add(
+      mesh
+    );
+
+
+    /*
+       X marker
+    */
+
+    var points1 = [
+      new THREE.Vector3(
+        -width / 2,
+        4,
+        -depth / 2
+      ),
+      new THREE.Vector3(
+        width / 2,
+        4,
+        depth / 2
+      )
     ];
 
-    var geometry = new THREE.BufferGeometry().setFromPoints(pts);
-    var material = new THREE.LineBasicMaterial({ color: 0xffffff });
-    var line = new THREE.Line(geometry, material);
-    meshGroup.add(line);
+
+    var points2 = [
+      new THREE.Vector3(
+        width / 2,
+        4,
+        -depth / 2
+      ),
+      new THREE.Vector3(
+        -width / 2,
+        4,
+        depth / 2
+      )
+    ];
+
+
+    addCutLine(
+      points1
+    );
+
+    addCutLine(
+      points2
+    );
   }
+
+
+  function addCutLine(
+    points
+  ) {
+
+    var geometry =
+      new THREE.BufferGeometry()
+        .setFromPoints(
+          points
+        );
+
+
+    var material =
+      new THREE.LineBasicMaterial({
+        color:
+          0xff2020
+      });
+
+
+    var line =
+      new THREE.Line(
+        geometry,
+        material
+      );
+
+
+    cutGroup.add(
+      line
+    );
+  }
+
+
+  function isCutHidden(
+    cut
+  ) {
+
+    if (!cut) {
+      return false;
+    }
+
+    if (cut.hidden) {
+      return true;
+    }
+
+    var hidden =
+      window.hiddenCuts ||
+      {};
+
+    return !!hidden[
+      cut.id
+    ];
+  }
+
 
   /* =========================================================
-     REFERENCE GRID
+     WIREFRAME
      ========================================================= */
 
-  function buildReferenceGridCentered(box) {
-    if (!box) return;
+  function applyWireframe() {
 
-    var size = box.getSize(new THREE.Vector3());
-    var maxSize = Math.max(size.x, size.y, size.z) * 2;
+    var enabled =
+      !!(
+        window.view3d &&
+        window.view3d.wireframe
+      );
 
-    if (maxSize <= 0) maxSize = 500;
 
-    var grid = new THREE.GridHelper(maxSize, 20, 0x333333, 0x1c1c1c);
-    grid.rotation.x = Math.PI / 2;
-    grid.position.y = -size.y / 2 - 20;
-    meshGroup.add(grid);
+    sheetGroup.traverse(
+      function (obj) {
+
+        if (
+          obj.material &&
+          obj.material.isMeshStandardMaterial
+        ) {
+
+          obj.material.wireframe =
+            enabled;
+        }
+      }
+    );
   }
+
 
   /* =========================================================
-     EMPTY MESSAGE
+     CAMERA FIT
      ========================================================= */
 
-  function addEmptyMessage() {
-    var geometry = new THREE.BoxGeometry(1, 1, 1);
-    var material = new THREE.MeshBasicMaterial({
-      color: 0x444444,
-      wireframe: true
-    });
-    var mesh = new THREE.Mesh(geometry, material);
-    meshGroup.add(mesh);
+  function fitCamera(
+    data
+  ) {
+
+    if (!camera) {
+      return;
+    }
+
+    var width =
+      inchTo3D(
+        num(
+          data.sheet &&
+          data.sheet.widthInch,
+          10
+        )
+      );
+
+    var depth =
+      inchTo3D(
+        num(
+          data.sheet &&
+          data.sheet.heightInch,
+          10
+        )
+      );
+
+
+    var maxSize =
+      Math.max(
+        width,
+        depth,
+        50
+      );
+
+
+    var view =
+      window.view3d ||
+      {};
+
+
+    var rotX =
+      num(
+        view.rotX,
+        -25
+      );
+
+    var rotY =
+      num(
+        view.rotY,
+        35
+      );
+
+
+    var dist =
+      Math.max(
+        maxSize * 1.6,
+        num(
+          view.dist,
+          maxSize * 2
+        )
+      );
+
+
+    var rx =
+      rotX *
+      Math.PI /
+      180;
+
+    var ry =
+      rotY *
+      Math.PI /
+      180;
+
+
+    var target =
+      new THREE.Vector3(
+        width / 2,
+        0,
+        depth / 2
+      );
+
+
+    camera.position.set(
+
+      target.x +
+      Math.sin(ry) *
+      dist,
+
+      target.y +
+      Math.sin(-rx) *
+      dist,
+
+      target.z +
+      Math.cos(ry) *
+      dist
+    );
+
+
+    camera.lookAt(
+      target
+    );
   }
+
 
   /* =========================================================
-     CAMERA
+     RENDER
      ========================================================= */
 
-  function updateCamera() {
-    if (!camera || !window.view3d) return;
+  function render() {
 
-    var rotX = num(window.view3d.rotX, -25);
-    var rotY = num(window.view3d.rotY, 35);
-    var dist = num(window.view3d.dist, 900);
+    if (
+      renderer &&
+      scene &&
+      camera
+    ) {
 
-    var rx = degToRad(rotX);
-    var ry = degToRad(rotY);
-
-    camera.position.x = dist * Math.cos(rx) * Math.sin(ry);
-    camera.position.y = dist * Math.sin(rx);
-    camera.position.z = dist * Math.cos(rx) * Math.cos(ry);
-
-    camera.lookAt(0, 0, 0);
+      renderer.render(
+        scene,
+        camera
+      );
+    }
   }
+
 
   /* =========================================================
      ANIMATION
      ========================================================= */
 
   function animate() {
-    requestAnimationFrame(animate);
-    if (!renderer) return;
 
-    if (window.view3d && window.view3d.autoRotate) {
-      window.view3d.rotY += 0.35;
+    animationId =
+      requestAnimationFrame(
+        animate
+      );
+
+
+    if (
+      window.view3d &&
+      window.view3d.autoRotate &&
+      masterGroup
+    ) {
+
+      masterGroup.rotation.y +=
+        0.008;
     }
 
-    updateCamera();
-    renderer.render(scene, camera);
+
+    render();
   }
+
 
   /* =========================================================
-     VIEW SWITCH
+     CONTROLS
      ========================================================= */
 
-  function setView(viewName) {
-    if (viewName !== "complete" && viewName !== "reverse") {
-      viewName = "complete";
-    }
-    currentView = viewName;
-    draw();
-  }
+  function bindControls() {
 
-  /* =========================================================
-     ZOOM
-     ========================================================= */
-
-  function zoomIn() {
-    if (!window.view3d) return;
-    window.view3d.dist *= 0.8;
-    window.view3d.dist = Math.max(100, Math.min(5000, window.view3d.dist));
-  }
-
-  function zoomOut() {
-    if (!window.view3d) return;
-    window.view3d.dist *= 1.2;
-    window.view3d.dist = Math.max(100, Math.min(5000, window.view3d.dist));
-  }
-
-  /* =========================================================
-     RESET
-     ========================================================= */
-
-  function reset() {
-    if (!window.view3d) return;
-
-    window.view3d.rotX = -25;
-    window.view3d.rotY = 35;
-    window.view3d.dist = 900;
-    window.view3d.autoRotate = false;
-    window.view3d.wireframe = false;
-
-    var autoBtn = getEl("btn-auto-rotate");
-    var wireBtn = getEl("btn-wireframe");
-
-    if (autoBtn) autoBtn.classList.remove("active");
-    if (wireBtn) wireBtn.classList.remove("active");
-
-    draw();
-  }
-
-  /* =========================================================
-     INIT BUTTONS
-     ========================================================= */
-
-  function init() {
-    var btnZoomIn = getEl("btn-zoom-in-3d");
-    var btnZoomOut = getEl("btn-zoom-out-3d");
-    var btnReset = getEl("btn-reset-3d");
-    var btnWireframe = getEl("btn-wireframe");
-    var btnAutoRotate = getEl("btn-auto-rotate");
-
-    if (btnZoomIn) btnZoomIn.onclick = zoomIn;
-    if (btnZoomOut) btnZoomOut.onclick = zoomOut;
-    if (btnReset) btnReset.onclick = reset;
-
-    if (btnWireframe) {
-      btnWireframe.onclick = function () {
-        window.view3d.wireframe = !window.view3d.wireframe;
-        this.classList.toggle("active", window.view3d.wireframe);
-        draw();
-      };
+    if (!canvas3dEl) {
+      return;
     }
 
-    if (btnAutoRotate) {
-      btnAutoRotate.onclick = function () {
-        window.view3d.autoRotate = !window.view3d.autoRotate;
-        this.classList.toggle("active", window.view3d.autoRotate);
-      };
+
+    var target =
+      renderer
+        ? renderer.domElement
+        : canvas3dEl;
+
+
+    var dragging = false;
+
+    var lastX = 0;
+    var lastY = 0;
+
+
+    target.addEventListener(
+      "pointerdown",
+      function (e) {
+
+        dragging = true;
+
+        lastX =
+          e.clientX;
+
+        lastY =
+          e.clientY;
+
+        try {
+
+          target.setPointerCapture(
+            e.pointerId
+          );
+
+        } catch (_) {}
+      }
+    );
+
+
+    target.addEventListener(
+      "pointermove",
+      function (e) {
+
+        if (!dragging) {
+          return;
+        }
+
+
+        var dx =
+          e.clientX -
+          lastX;
+
+        var dy =
+          e.clientY -
+          lastY;
+
+
+        masterGroup.rotation.y +=
+          dx * 0.01;
+
+        masterGroup.rotation.x +=
+          dy * 0.01;
+
+
+        lastX =
+          e.clientX;
+
+        lastY =
+          e.clientY;
+
+
+        render();
+      }
+    );
+
+
+    target.addEventListener(
+      "pointerup",
+      function (e) {
+
+        dragging = false;
+
+        try {
+
+          target.releasePointerCapture(
+            e.pointerId
+          );
+
+        } catch (_) {}
+      }
+    );
+
+
+    target.addEventListener(
+      "pointercancel",
+      function () {
+
+        dragging = false;
+      }
+    );
+
+
+    target.addEventListener(
+      "wheel",
+      function (e) {
+
+        e.preventDefault();
+
+        if (!window.view3d) {
+
+          window.view3d = {
+
+            rotX: -25,
+            rotY: 35,
+            dist: 900,
+            autoRotate: false,
+            wireframe: false
+          };
+        }
+
+
+        var factor =
+          e.deltaY < 0
+            ? 0.9
+            : 1.1;
+
+
+        window.view3d.dist *=
+          factor;
+
+
+        window.view3d.dist =
+          Math.max(
+            30,
+            Math.min(
+              10000,
+              window.view3d.dist
+            )
+          );
+
+
+        fitCamera(
+          masterData ||
+          getMasterData()
+        );
+
+        render();
+      },
+      {
+        passive: false
+      }
+    );
+  }
+
+
+  /* =========================================================
+     PUBLIC CONTROLS
+     ========================================================= */
+
+  function setWireframe(
+    value
+  ) {
+
+    if (!window.view3d) {
+      return;
+    }
+
+    window.view3d.wireframe =
+      !!value;
+
+    applyWireframe();
+
+    render();
+  }
+
+
+  function setAutoRotate(
+    value
+  ) {
+
+    if (!window.view3d) {
+      return;
+    }
+
+    window.view3d.autoRotate =
+      !!value;
+  }
+
+
+  function resetView() {
+
+    if (!masterGroup) {
+      return;
+    }
+
+    masterGroup.rotation.set(
+      0,
+      0,
+      0
+    );
+
+    if (window.view3d) {
+
+      window.view3d.rotX =
+        -25;
+
+      window.view3d.rotY =
+        35;
+    }
+
+
+    fitCamera(
+      masterData ||
+      getMasterData()
+    );
+
+    render();
+  }
+
+
+  /* =========================================================
+     START ANIMATION
+     ========================================================= */
+
+  function startAnimation() {
+
+    if (!animationId) {
+
+      animate();
     }
   }
 
+
   /* =========================================================
-     EXPOSE
+     PUBLIC API
      ========================================================= */
 
   window.ThreeD = {
-    init: init,
-    draw: draw,
-    setView: setView,
-    zoomIn: zoomIn,
-    zoomOut: zoomOut,
-    reset: reset
+
+    init:
+      init,
+
+    draw:
+      draw,
+
+    resize:
+      resize,
+
+    render:
+      render,
+
+    reset:
+      resetView,
+
+    resetView:
+      resetView,
+
+    setWireframe:
+      setWireframe,
+
+    setAutoRotate:
+      setAutoRotate,
+
+    getMasterData:
+      getMasterData,
+
+    startAnimation:
+      startAnimation
   };
+
+
+  console.log(
+    "ThreeD V7 loaded — Master Geometry viewer"
+  );
 
 })();
