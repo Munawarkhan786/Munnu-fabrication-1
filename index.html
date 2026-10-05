@@ -16,10 +16,7 @@
 
 <body>
 
-  <!-- =====================================================
-       LOGIN SCREEN
-       ===================================================== -->
-
+  <!-- LOGIN SCREEN -->
   <div id="login-screen" class="login-screen">
 
     <div class="login-box">
@@ -55,10 +52,7 @@
   </div>
 
 
-  <!-- =====================================================
-       APP CONTENT
-       ===================================================== -->
-
+  <!-- APP CONTENT -->
   <div
     id="app-content"
     style="display:none;">
@@ -98,33 +92,10 @@
 
     <nav class="tabs">
 
-      <button
-        type="button"
-        class="tab active"
-        data-tab="input">
-        📝 Input
-      </button>
-
-      <button
-        type="button"
-        class="tab"
-        data-tab="view">
-        📐 View
-      </button>
-
-      <button
-        type="button"
-        class="tab"
-        data-tab="result">
-        ✂️ Result
-      </button>
-
-      <button
-        type="button"
-        class="tab"
-        data-tab="settings">
-        ⚙️ Settings
-      </button>
+      <button type="button" class="tab active" data-tab="input">📝 Input</button>
+      <button type="button" class="tab" data-tab="view">📐 View</button>
+      <button type="button" class="tab" data-tab="result">✂️ Result</button>
+      <button type="button" class="tab" data-tab="settings">⚙️ Settings</button>
 
     </nav>
 
@@ -132,112 +103,41 @@
     <main>
 
       <!-- INPUT TAB -->
-      <section
-        id="tab-input"
-        class="tab-content">
+      <section id="tab-input" class="tab-content">
 
         <div class="card">
-
-          <h2>
-            🏷️ Project Name
-          </h2>
-
-          <input
-            class="kw-input"
-            id="keyword"
-            type="text"
-            placeholder="box, sink, counter"
-            value="box"
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck="false">
-
+          <h2>🏷️ Project Name</h2>
+          <input class="kw-input" id="keyword" type="text" placeholder="box, sink, counter" value="box" autocomplete="off" autocapitalize="off" spellcheck="false">
         </div>
 
 
         <div class="card">
 
-          <h2>
-            📐 Size Entry
-          </h2>
+          <h2>📐 Size Entry</h2>
 
-          <div class="side-label">
-            Active Side
-          </div>
+          <div class="side-label">Active Side</div>
 
           <div class="side-toggle">
-
-            <button
-              type="button"
-              class="side-btn active"
-              id="side-len">
-
-              📏 LENGTH
-
-            </button>
-
-            <button
-              type="button"
-              class="side-btn"
-              id="side-dep">
-
-              📐 DEPTH
-
-            </button>
-
+            <button type="button" class="side-btn active" id="side-len">📏 LENGTH</button>
+            <button type="button" class="side-btn" id="side-dep">📐 DEPTH</button>
           </div>
 
 
-          <div
-            class="side-label"
-            style="margin-top:12px;">
+          <div class="side-label" style="margin-top:12px;">Current Size</div>
 
-            Current Size
-
-          </div>
-
-          <div
-            class="size-display"
-            id="display"
-            role="status"
-            aria-live="polite">
-
-            0
-
-          </div>
+          <div class="size-display" id="display" role="status" aria-live="polite">0</div>
 
 
           <div class="total-display">
-
-            <span class="total-label">
-              Total:
-            </span>
-
-            <span
-              class="total-value"
-              id="total-value">
-
-              0
-
-            </span>
-
+            <span class="total-label">Total:</span>
+            <span class="total-value" id="total-value">0</span>
           </div>
 
 
-          <div
-            class="side-label"
-            style="margin-top:14px;">
-
-            Bend Degree
-
-          </div>
+          <div class="side-label" style="margin-top:14px;">Bend Degree</div>
 
           <div class="angle-row">
-
-            <select
-              id="angle-select"
-              class="setting-input">
-
+            <select id="angle-select" class="setting-input">
               <option value="180">180°</option>
               <option value="135">135°</option>
               <option value="120">120°</option>
@@ -258,190 +158,64 @@
               <option value="10">10°</option>
               <option value="5">5°</option>
               <option value="0">0°</option>
-
             </select>
-
           </div>
 
 
-          <div
-            class="side-label"
-            style="margin-top:14px;">
-
-            Bend Direction
-
-          </div>
+          <div class="side-label" style="margin-top:14px;">Bend Direction</div>
 
           <div class="side-toggle">
-
-            <button
-              type="button"
-              class="side-btn active"
-              id="direction-up">
-
-              ⬆️ UP
-
-            </button>
-
-            <button
-              type="button"
-              class="side-btn"
-              id="direction-down">
-
-              ⬇️ DOWN
-
-            </button>
-
+            <button type="button" class="side-btn active" id="direction-up">⬆️ UP</button>
+            <button type="button" class="side-btn" id="direction-down">⬇️ DOWN</button>
           </div>
 
 
-          <div
-            class="calc-grid"
-            id="calc-grid">
-          </div>
-
-          <div
-            class="frac-grid"
-            id="frac-grid">
-          </div>
+          <div class="calc-grid" id="calc-grid"></div>
+          <div class="frac-grid" id="frac-grid"></div>
 
 
           <div class="action-row">
-
-            <button
-              type="button"
-              class="btn btn-add"
-              id="btn-add">
-
-              ➕ +
-
-            </button>
-
-            <button
-              type="button"
-              class="btn btn-primary"
-              id="btn-ok">
-
-              ✓ OK
-
-            </button>
-
-            <button
-              type="button"
-              class="btn btn-secondary"
-              id="btn-clear">
-
-              🗑️
-
-            </button>
-
+            <button type="button" class="btn btn-add" id="btn-add">➕ +</button>
+            <button type="button" class="btn btn-primary" id="btn-ok">✓ OK</button>
+            <button type="button" class="btn btn-secondary" id="btn-clear">🗑️</button>
           </div>
 
 
-          <div
-            id="input-error"
-            class="login-error"
-            style="display:none;">
-          </div>
+          <div id="input-error" class="login-error" style="display:none;"></div>
 
 
           <div class="auto-hint">
-
-            Size daalo → Angle select karo →
-            UP/DOWN select karo →
-            <b>OK</b> → line automatically add hogi.
-
+            Size daalo → Angle select karo → UP/DOWN select karo → <b>OK</b> → line automatically add hogi.
           </div>
 
         </div>
 
 
-        <div
-          id="edit-bar"
-          class="edit-bar hidden">
-
-          <span
-            id="edit-info"
-            class="edit-info">
-
-            Editing L1
-
-          </span>
-
+        <div id="edit-bar" class="edit-bar hidden">
+          <span id="edit-info" class="edit-info">Editing L1</span>
           <div class="edit-actions">
-
-            <button
-              type="button"
-              class="btn-edit-save"
-              id="btn-save-edit">
-
-              ✓ Save
-
-            </button>
-
-            <button
-              type="button"
-              class="btn-edit-cancel"
-              id="btn-cancel-edit">
-
-              ✕ Cancel
-
-            </button>
-
+            <button type="button" class="btn-edit-save" id="btn-save-edit">✓ Save</button>
+            <button type="button" class="btn-edit-cancel" id="btn-cancel-edit">✕ Cancel</button>
           </div>
-
         </div>
 
 
         <div class="card">
 
-          <h2>
-            📋 Marking Lines (Live)
-          </h2>
+          <h2>📋 Marking Lines (Live)</h2>
 
           <div class="lines-section">
-
-            <div class="lines-section-title">
-
-              📏 LENGTH SIDE
-
+            <div class="lines-section-title">📏 LENGTH SIDE</div>
+            <div id="len-lines-list" class="lines-list">
+              <div class="empty-small">Abhi koi length line nahi</div>
             </div>
-
-            <div
-              id="len-lines-list"
-              class="lines-list">
-
-              <div class="empty-small">
-
-                Abhi koi length line nahi
-
-              </div>
-
-            </div>
-
           </div>
 
-
           <div class="lines-section">
-
-            <div class="lines-section-title">
-
-              📐 DEPTH SIDE
-
+            <div class="lines-section-title">📐 DEPTH SIDE</div>
+            <div id="dep-lines-list" class="lines-list">
+              <div class="empty-small">Abhi koi depth line nahi</div>
             </div>
-
-            <div
-              id="dep-lines-list"
-              class="lines-list">
-
-              <div class="empty-small">
-
-                Abhi koi depth line nahi
-
-              </div>
-
-            </div>
-
           </div>
 
         </div>
@@ -450,219 +224,62 @@
 
 
       <!-- VIEW TAB -->
-      <section
-        id="tab-view"
-        class="tab-content hidden">
+      <section id="tab-view" class="tab-content hidden">
 
         <div class="card">
-
-          <h2>
-            👁️ View Mode
-          </h2>
-
+          <h2>👁️ View Mode</h2>
           <div class="view-toggle">
+            <button type="button" class="view-btn active" id="view-flat" data-view="flat">📐 FLAT SHEET</button>
+            <button type="button" class="view-btn" id="view-3d" data-view="3d">📦 3D BOX</button>
+          </div>
+        </div>
 
-            <button
-              type="button"
-              class="view-btn active"
-              id="view-flat"
-              data-view="flat">
 
-              📐 FLAT SHEET
+        <div class="card" id="flat-container">
 
-            </button>
+          <h2>📐 Flat Sheet Marking</h2>
 
-            <button
-              type="button"
-              class="view-btn"
-              id="view-3d"
-              data-view="3d">
+          <div class="view-hint">🔵 Lines blue · 🔴 Cup cut portion red (click to hide/show)</div>
 
-              📦 3D BOX
+          <canvas id="canvasFlat"></canvas>
 
-            </button>
+          <div class="view-controls">
+            <button type="button" class="btn btn-secondary" id="btn-zoom-in">🔍+</button>
+            <button type="button" class="btn btn-secondary" id="btn-zoom-out">🔍−</button>
+            <button type="button" class="btn btn-secondary" id="btn-reset-flat">🔄 Reset</button>
+            <button type="button" class="btn btn-secondary" id="btn-print">🖨️ Print</button>
+          </div>
 
+          <div class="zoom-indicator">Zoom: <span id="zoom-level-flat">1.0x</span></div>
+
+          <div class="legend">
+            <span class="legend-item"><span class="legend-color blue"></span>Marking lines</span>
+            <span class="legend-item"><span class="legend-color red"></span>Cup cut</span>
           </div>
 
         </div>
 
 
-        <div
-          class="card"
-          id="flat-container">
+        <div class="card hidden" id="three-container">
 
-          <h2>
-            📐 Flat Sheet Marking
-          </h2>
+          <h2>📦 3D Box Preview</h2>
 
-          <div class="view-hint">
+          <div class="view-hint">👆 Drag to rotate 360° · Pinch to zoom</div>
 
-            🔵 Lines blue ·
-            🔴 Cup cut portion red
-            (click to hide/show)
-
-          </div>
-
-          <canvas
-            id="canvasFlat">
-          </canvas>
-
+          <div id="canvas3d" class="canvas-3d"></div>
 
           <div class="view-controls">
-
-            <button
-              type="button"
-              class="btn btn-secondary"
-              id="btn-zoom-in">
-
-              🔍+
-
-            </button>
-
-            <button
-              type="button"
-              class="btn btn-secondary"
-              id="btn-zoom-out">
-
-              🔍−
-
-            </button>
-
-            <button
-              type="button"
-              class="btn btn-secondary"
-              id="btn-reset-flat">
-
-              🔄 Reset
-
-            </button>
-
-            <button
-              type="button"
-              class="btn btn-secondary"
-              id="btn-print">
-
-              🖨️ Print
-
-            </button>
-
+            <button type="button" class="btn btn-secondary" id="btn-zoom-in-3d">🔍+</button>
+            <button type="button" class="btn btn-secondary" id="btn-zoom-out-3d">🔍−</button>
+            <button type="button" class="btn btn-secondary" id="btn-reset-3d">🔄 Reset</button>
           </div>
-
-
-          <div class="zoom-indicator">
-
-            Zoom:
-            <span id="zoom-level-flat">
-              1.0x
-            </span>
-
-          </div>
-
-
-          <div class="legend">
-
-            <span class="legend-item">
-
-              <span class="legend-color blue"></span>
-              Marking lines
-
-            </span>
-
-            <span class="legend-item">
-
-              <span class="legend-color red"></span>
-              Cup cut
-
-            </span>
-
-          </div>
-
-        </div>
-
-
-        <div
-          class="card hidden"
-          id="three-container">
-
-          <h2>
-            📦 3D Box Preview
-          </h2>
-
-          <div class="view-hint">
-
-            👆 Drag to rotate 360° ·
-            Pinch to zoom
-
-          </div>
-
-          <div
-            id="canvas3d"
-            class="canvas-3d">
-          </div>
-
 
           <div class="view-controls">
-
-            <button
-              type="button"
-              class="btn btn-secondary"
-              id="btn-zoom-in-3d">
-
-              🔍+
-
-            </button>
-
-            <button
-              type="button"
-              class="btn btn-secondary"
-              id="btn-zoom-out-3d">
-
-              🔍−
-
-            </button>
-
-            <button
-              type="button"
-              class="btn btn-secondary"
-              id="btn-reset-3d">
-
-              🔄 Reset
-
-            </button>
-
+            <button type="button" class="btn btn-secondary" id="btn-wireframe">▦ Wire</button>
+            <button type="button" class="btn btn-secondary" id="btn-auto-rotate">▶ Auto</button>
           </div>
 
-
-          <div class="view-controls">
-
-            <button
-              type="button"
-              class="btn btn-secondary"
-              id="btn-wireframe">
-
-              ▦ Wire
-
-            </button>
-
-            <button
-              type="button"
-              class="btn btn-secondary"
-              id="btn-auto-rotate">
-
-              ▶ Auto
-
-            </button>
-
-          </div>
-
-
-          <div class="legend">
-
-            🔵 Sheet ·
-            🔴 Bend lines ·
-            ✂️ Cup cuts
-
-          </div>
+          <div class="legend">🔵 Sheet · 🔴 Bend lines · ✂️ Cup cuts</div>
 
         </div>
 
@@ -670,529 +287,129 @@
 
 
       <!-- RESULT TAB -->
-      <section
-        id="tab-result"
-        class="tab-content hidden">
+      <section id="tab-result" class="tab-content hidden">
 
         <div class="card">
-
-          <h2>
-            🧮 Size Totals
-          </h2>
-
+          <h2>🧮 Size Totals</h2>
           <div id="math-result">
-
-            <div class="empty-hint">
-
-              Size enter karo.
-
-            </div>
-
+            <div class="empty-hint">Size enter karo.</div>
           </div>
-
         </div>
 
 
         <div class="card">
-
-          <h2>
-            ✂️ Bend &amp; Cup Cut
-          </h2>
-
-          <div class="info-box">
-
-            Har line ka bend,
-            angle, direction aur
-            required cup cut yahan dikhega.
-
-          </div>
-
+          <h2>✂️ Bend &amp; Cup Cut</h2>
+          <div class="info-box">Har line ka bend, angle, direction aur required cup cut yahan dikhega.</div>
           <div id="result-list">
-
-            <div class="empty-hint">
-
-              Pehle lines add karo.
-
-            </div>
-
+            <div class="empty-hint">Pehle lines add karo.</div>
           </div>
-
         </div>
 
 
         <div class="card">
-
-          <h2>
-            📊 Summary
-          </h2>
-
+          <h2>📊 Summary</h2>
           <div class="result-box">
-
-
-            <div class="result-row">
-
-              <span class="label">
-                Total Length
-              </span>
-
-              <span
-                class="value"
-                id="sum-len">
-
-                -
-
-              </span>
-
-            </div>
-
-
-            <div class="result-row">
-
-              <span class="label">
-                Total Depth
-              </span>
-
-              <span
-                class="value"
-                id="sum-dep">
-
-                -
-
-              </span>
-
-            </div>
-
-
-            <div class="result-row">
-
-              <span class="label">
-                Length Lines
-              </span>
-
-              <span
-                class="value"
-                id="sum-len-lines">
-
-                -
-
-              </span>
-
-            </div>
-
-
-            <div class="result-row">
-
-              <span class="label">
-                Depth Lines
-              </span>
-
-              <span
-                class="value"
-                id="sum-dep-lines">
-
-                -
-
-              </span>
-
-            </div>
-
-
-            <div class="result-row">
-
-              <span class="label">
-                Total Corners
-              </span>
-
-              <span
-                class="value"
-                id="sum-corners">
-
-                -
-
-              </span>
-
-            </div>
-
-
-            <div class="result-row">
-
-              <span class="label">
-                Material
-              </span>
-
-              <span
-                class="value"
-                id="sum-material">
-
-                -
-
-              </span>
-
-            </div>
-
-
-            <div class="result-row">
-
-              <span class="label">
-                Thickness
-              </span>
-
-              <span
-                class="value"
-                id="sum-thick">
-
-                -
-
-              </span>
-
-            </div>
-
-
-            <div class="result-row">
-
-              <span class="label">
-                V-Die Width
-              </span>
-
-              <span
-                class="value"
-                id="sum-vdie">
-
-                -
-
-              </span>
-
-            </div>
-
-
-            <div class="result-row">
-
-              <span class="label">
-                Bend Radius
-              </span>
-
-              <span
-                class="value"
-                id="sum-radius">
-
-                -
-
-              </span>
-
-            </div>
-
-
-            <div class="result-row">
-
-              <span class="label">
-                K-Factor
-              </span>
-
-              <span
-                class="value"
-                id="sum-kfactor">
-
-                -
-
-              </span>
-
-            </div>
-
-
+            <div class="result-row"><span class="label">Total Length</span><span class="value" id="sum-len">-</span></div>
+            <div class="result-row"><span class="label">Total Depth</span><span class="value" id="sum-dep">-</span></div>
+            <div class="result-row"><span class="label">Length Lines</span><span class="value" id="sum-len-lines">-</span></div>
+            <div class="result-row"><span class="label">Depth Lines</span><span class="value" id="sum-dep-lines">-</span></div>
+            <div class="result-row"><span class="label">Total Corners</span><span class="value" id="sum-corners">-</span></div>
+            <div class="result-row"><span class="label">Material</span><span class="value" id="sum-material">-</span></div>
+            <div class="result-row"><span class="label">Thickness</span><span class="value" id="sum-thick">-</span></div>
+            <div class="result-row"><span class="label">V-Die Width</span><span class="value" id="sum-vdie">-</span></div>
+            <div class="result-row"><span class="label">Bend Radius</span><span class="value" id="sum-radius">-</span></div>
+            <div class="result-row"><span class="label">K-Factor</span><span class="value" id="sum-kfactor">-</span></div>
           </div>
-
         </div>
 
       </section>
 
 
       <!-- SETTINGS TAB -->
-      <section
-        id="tab-settings"
-        class="tab-content hidden">
+      <section id="tab-settings" class="tab-content hidden">
 
         <div class="card">
-
-          <h2>
-            🔩 Material
-          </h2>
-
+          <h2>🔩 Material</h2>
           <div class="material-row">
-
-            <button
-              type="button"
-              class="material-btn active"
-              data-material="SS304">
-
-              SS 304
-
-            </button>
-
-            <button
-              type="button"
-              class="material-btn"
-              data-material="SS202">
-
-              SS 202
-
-            </button>
-
+            <button type="button" class="material-btn active" data-material="SS304">SS 304</button>
+            <button type="button" class="material-btn" data-material="SS202">SS 202</button>
           </div>
-
           <div class="info-box">
-
-            <b>SS 304:</b>
-            K-Factor 0.44
-            <br>
-
-            <b>SS 202:</b>
-            K-Factor 0.45
-
+            <b>SS 304:</b> K-Factor 0.44<br>
+            <b>SS 202:</b> K-Factor 0.45
           </div>
-
         </div>
 
 
         <div class="card">
-
-          <h2>
-            📏 Sheet Thickness (mm)
-          </h2>
-
+          <h2>📏 Sheet Thickness (mm)</h2>
           <div class="thickness-row">
-
-            <button
-              type="button"
-              class="thickness-btn"
-              data-thick="0.5">
-              0.5
-            </button>
-
-            <button
-              type="button"
-              class="thickness-btn active"
-              data-thick="0.8">
-              0.8
-            </button>
-
-            <button
-              type="button"
-              class="thickness-btn"
-              data-thick="1.0">
-              1.0
-            </button>
-
-            <button
-              type="button"
-              class="thickness-btn"
-              data-thick="1.2">
-              1.2
-            </button>
-
-            <button
-              type="button"
-              class="thickness-btn"
-              data-thick="1.5">
-              1.5
-            </button>
-
-            <button
-              type="button"
-              class="thickness-btn"
-              data-thick="2.0">
-              2.0
-            </button>
-
-            <button
-              type="button"
-              class="thickness-btn"
-              data-thick="3.0">
-              3.0
-            </button>
-
+            <button type="button" class="thickness-btn" data-thick="0.5">0.5</button>
+            <button type="button" class="thickness-btn active" data-thick="0.8">0.8</button>
+            <button type="button" class="thickness-btn" data-thick="1.0">1.0</button>
+            <button type="button" class="thickness-btn" data-thick="1.2">1.2</button>
+            <button type="button" class="thickness-btn" data-thick="1.5">1.5</button>
+            <button type="button" class="thickness-btn" data-thick="2.0">2.0</button>
+            <button type="button" class="thickness-btn" data-thick="3.0">3.0</button>
           </div>
 
-
-          <input
-            class="custom-input"
-            type="number"
-            inputmode="decimal"
-            id="customThick"
-            placeholder="Custom mm (0.1 - 10)"
-            step="0.1"
-            min="0.1"
-            max="10">
-
+          <input class="custom-input" type="number" inputmode="decimal" id="customThick" placeholder="Custom mm (0.1 - 10)" step="0.1" min="0.1" max="10">
         </div>
 
 
         <div class="card">
 
-          <h2>
-            ⚙️ Advanced Bend Settings
-          </h2>
+          <h2>⚙️ Advanced Bend Settings</h2>
 
-          <div class="info-box">
-
-            Ye default values hain.
-            Workshop mein test karke adjust karo.
-            Save ho jayengi.
-
-          </div>
-
+          <div class="info-box">Ye default values hain. Workshop mein test karke adjust karo. Save ho jayengi.</div>
 
           <div class="setting-row">
-
-            <label for="setVdie">
-              V-Die Width (mm)
-            </label>
-
-            <input
-              type="number"
-              id="setVdie"
-              class="setting-input"
-              step="0.1"
-              min="0.1"
-              max="100">
-
+            <label for="setVdie">V-Die Width (mm)</label>
+            <input type="number" id="setVdie" class="setting-input" step="0.1" min="0.1" max="100">
           </div>
-
 
           <div class="setting-row">
-
-            <label for="setRadius">
-              Bend Radius R (mm)
-            </label>
-
-            <input
-              type="number"
-              id="setRadius"
-              class="setting-input"
-              step="0.01"
-              min="0.01"
-              max="50">
-
+            <label for="setRadius">Bend Radius R (mm)</label>
+            <input type="number" id="setRadius" class="setting-input" step="0.01" min="0.01" max="50">
           </div>
-
 
           <div class="setting-row">
-
-            <label for="setKfactor">
-              K-Factor
-            </label>
-
-            <input
-              type="number"
-              id="setKfactor"
-              class="setting-input"
-              step="0.01"
-              min="0.1"
-              max="0.5">
-
+            <label for="setKfactor">K-Factor</label>
+            <input type="number" id="setKfactor" class="setting-input" step="0.01" min="0.1" max="0.5">
           </div>
-
 
           <div class="setting-row">
-
-            <label for="setSpringback">
-              Springback (°)
-            </label>
-
-            <input
-              type="number"
-              id="setSpringback"
-              class="setting-input"
-              step="0.1"
-              min="0"
-              max="5">
-
+            <label for="setSpringback">Springback (°)</label>
+            <input type="number" id="setSpringback" class="setting-input" step="0.1" min="0" max="5">
           </div>
-
 
           <div class="setting-row">
-
-            <label for="setRelief">
-              Corner Relief (mm)
-            </label>
-
-            <input
-              type="number"
-              id="setRelief"
-              class="setting-input"
-              step="0.1"
-              min="0"
-              max="20">
-
+            <label for="setRelief">Corner Relief (mm)</label>
+            <input type="number" id="setRelief" class="setting-input" step="0.1" min="0" max="20">
           </div>
 
-
-          <div
-            class="action-row"
-            style="margin-top:12px;">
-
-            <button
-              type="button"
-              class="btn btn-secondary"
-              id="btn-reset-settings">
-
-              🔄 Reset Default
-
-            </button>
-
-            <button
-              type="button"
-              class="btn btn-primary"
-              id="btn-save-settings">
-
-              💾 Save Settings
-
-            </button>
-
+          <div class="action-row" style="margin-top:12px;">
+            <button type="button" class="btn btn-secondary" id="btn-reset-settings">🔄 Reset Default</button>
+            <button type="button" class="btn btn-primary" id="btn-save-settings">💾 Save Settings</button>
           </div>
 
         </div>
 
 
         <div class="card">
-
-          <h2>
-            📖 Quick Guide
-          </h2>
-
+          <h2>📖 Quick Guide</h2>
           <div class="info-box">
-
-            <b>V-Die Width:</b>
-            Press brake ke neeche wala tool.
-            <br>
-            Default: 8 × Thickness
-            <br><br>
-
-            <b>Bend Radius (R):</b>
-            Andar ki taraf ka curve.
-            <br>
-            Default: V / 6.5 ya R = T
-            <br><br>
-
-            <b>K-Factor:</b>
-            Neutral axis position.
-            <br>
-            SS 304 = 0.44,
-            SS 202 = 0.45
-            <br><br>
-
-            <b>Springback:</b>
-            Material wapas aata hai.
-            <br>
-            SS ke liye 0.5° – 1.0° typical
-            <br><br>
-
-            <b>Corner Relief:</b>
-            Corner ka cut size.
-            <br>
+            <b>V-Die Width:</b> Press brake ke neeche wala tool.<br>
+            Default: 8 × Thickness<br><br>
+            <b>Bend Radius (R):</b> Andar ki taraf ka curve.<br>
+            Default: V / 6.5 ya R = T<br><br>
+            <b>K-Factor:</b> Neutral axis position.<br>
+            SS 304 = 0.44, SS 202 = 0.45<br><br>
+            <b>Springback:</b> Material wapas aata hai.<br>
+            SS ke liye 0.5° – 1.0° typical<br><br>
+            <b>Corner Relief:</b> Corner ka cut size.<br>
             Default: R + T + 0.5mm
-
           </div>
-
         </div>
 
       </section>
@@ -1201,77 +418,27 @@
 
 
     <footer class="footer-bar">
-
-      <button
-        type="button"
-        class="btn btn-secondary"
-        id="btn-save">
-
-        💾 Save
-
-      </button>
-
-      <button
-        type="button"
-        class="btn btn-primary"
-        id="btn-calc">
-
-        ⚙️ Calculate
-
-      </button>
-
+      <button type="button" class="btn btn-secondary" id="btn-save">💾 Save</button>
+      <button type="button" class="btn btn-primary" id="btn-calc">⚙️ Calculate</button>
     </footer>
 
   </div>
 
 
   <!-- BUGS PANEL -->
-  <div
-    id="bugs-panel"
-    class="bugs-panel hidden">
+  <div id="bugs-panel" class="bugs-panel hidden">
 
     <div class="bugs-header">
-
-      <span>
-        🐛 Error Log
-      </span>
-
-      <button
-        type="button"
-        id="bugs-close"
-        class="bugs-close">
-
-        ✕
-
-      </button>
-
+      <span>🐛 Error Log</span>
+      <button type="button" id="bugs-close" class="bugs-close">✕</button>
     </div>
 
-
-    <div
-      id="bugs-list"
-      class="bugs-list">
-
-      <div class="empty-hint">
-
-        ✅ Koi error nahi
-
-      </div>
-
+    <div id="bugs-list" class="bugs-list">
+      <div class="empty-hint">✅ Koi error nahi</div>
     </div>
-
 
     <div class="bugs-footer">
-
-      <button
-        type="button"
-        id="bugs-clear"
-        class="btn btn-secondary">
-
-        🗑️ Clear All
-
-      </button>
-
+      <button type="button" id="bugs-clear" class="btn btn-secondary">🗑️ Clear All</button>
     </div>
 
   </div>
@@ -1283,63 +450,54 @@
 
   <!-- APP JS -->
   <script src="js/bugs.js"></script>
-
   <script src="js/security.js"></script>
-
   <script src="js/core.js"></script>
-
   <script src="js/geometry.js"></script>
-
   <script src="js/sheet.js"></script>
-
   <script src="js/settings.js"></script>
-
   <script src="js/flat.js"></script>
-
   <script src="js/3d.js"></script>
-
   <script src="js/result.js"></script>
-
   <script src="js/ui.js"></script>
-
   <script src="js/main.js"></script>
 
 
-  <!-- =====================================================
-       DEBUG TOOL — Temporary
-       Yeh data popup mein dikhayega
-       3 second baad site khulne ke
-       ===================================================== -->
+  <!-- DEBUG TOOL (Temporary) -->
   <script>
   setTimeout(function() {
     var s = window.AppState || window.state || {};
     var r = window.GeometryEngine ? window.GeometryEngine.analyze(s) : null;
 
+    var flatLines = r && r.flat && r.flat.lengthLines ? r.flat.lengthLines : [];
+    var firstLine = flatLines[0] || null;
+
     var out = {
-      "=== STATE ===": "==========",
       "lenLines_count": s.lenLines ? s.lenLines.length : -1,
       "depLines_count": s.depLines ? s.depLines.length : -1,
-      "settings_material": s.settings ? s.settings.material : "N/A",
-      "settings_thickness": s.settings ? s.settings.thickness : "N/A",
-
-      "=== SHEET ===": "==========",
       "sheet_width": r && r.sheet ? r.sheet.widthInch : "NO SHEET",
       "sheet_height": r && r.sheet ? r.sheet.heightInch : "NO SHEET",
-
-      "=== FLAT ===": "==========",
-      "flat_lengthLines": r && r.flat && r.flat.lengthLines ? r.flat.lengthLines.length : 0,
+      "flat_lengthLines": flatLines.length,
       "flat_depthLines": r && r.flat && r.flat.depthLines ? r.flat.depthLines.length : 0,
-      "flat_first_len": r && r.flat && r.flat.lengthLines ? r.flat.lengthLines[0] : null,
-
-      "=== CUTS ===": "==========",
       "cuts_total": r && r.cuts ? r.cuts.length : 0,
       "cuts_required": r && r.cuts ? r.cuts.filter(function(c){return c.required;}).length : 0,
-
-      "=== 3D ===": "==========",
-      "records_count": r && r.threeD && r.threeD.records ? r.threeD.records.length : 0
+      "records_count": r && r.threeD && r.threeD.records ? r.threeD.records.length : 0,
+      "first_isBend": firstLine ? firstLine.isBend : "NO LINE",
+      "first_angle": firstLine ? firstLine.angle : "NO LINE",
+      "first_effectiveAngle": firstLine ? firstLine.effectiveAngle : "NO LINE",
+      "first_direction": firstLine ? firstLine.direction : "NO LINE",
+      "first_bendCenter": firstLine ? firstLine.bendCenterInch : "NO LINE",
+      "intersections_count": r && r.intersections ? r.intersections.length : 0
     };
 
-    alert(JSON.stringify(out, null, 2));
+    var div = document.createElement('div');
+    div.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:#0a0d14;color:#fff;z-index:999999;padding:20px;overflow:auto;font-family:monospace;font-size:13px;line-height:1.8;';
+
+    var html = '<h2 style="color:#fbbf24;margin-bottom:15px;">📊 DEBUG DATA</h2>';
+    html += '<pre style="white-space:pre-wrap;word-break:break-all;color:#e8e8e8;">' + JSON.stringify(out, null, 2) + '</pre>';
+    html += '<button onclick="this.parentElement.remove()" style="margin-top:20px;padding:15px 30px;background:#fbbf24;color:#000;border:none;border-radius:8px;font-weight:bold;font-size:16px;width:100%;">CLOSE</button>';
+
+    div.innerHTML = html;
+    document.body.appendChild(div);
   }, 3000);
   </script>
 
