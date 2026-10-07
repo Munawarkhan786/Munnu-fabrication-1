@@ -462,45 +462,5 @@
   <script src="js/main.js"></script>
 
 
-  <!-- DEBUG TOOL (Temporary) -->
-  <script>
-  setTimeout(function() {
-    var s = window.AppState || window.state || {};
-    var r = window.GeometryEngine ? window.GeometryEngine.analyze(s) : null;
-
-    var flatLines = r && r.flat && r.flat.lengthLines ? r.flat.lengthLines : [];
-    var firstLine = flatLines[0] || null;
-
-    var out = {
-      "lenLines_count": s.lenLines ? s.lenLines.length : -1,
-      "depLines_count": s.depLines ? s.depLines.length : -1,
-      "sheet_width": r && r.sheet ? r.sheet.widthInch : "NO SHEET",
-      "sheet_height": r && r.sheet ? r.sheet.heightInch : "NO SHEET",
-      "flat_lengthLines": flatLines.length,
-      "flat_depthLines": r && r.flat && r.flat.depthLines ? r.flat.depthLines.length : 0,
-      "cuts_total": r && r.cuts ? r.cuts.length : 0,
-      "cuts_required": r && r.cuts ? r.cuts.filter(function(c){return c.required;}).length : 0,
-      "records_count": r && r.threeD && r.threeD.records ? r.threeD.records.length : 0,
-      "first_isBend": firstLine ? firstLine.isBend : "NO LINE",
-      "first_angle": firstLine ? firstLine.angle : "NO LINE",
-      "first_effectiveAngle": firstLine ? firstLine.effectiveAngle : "NO LINE",
-      "first_direction": firstLine ? firstLine.direction : "NO LINE",
-      "first_bendCenter": firstLine ? firstLine.bendCenterInch : "NO LINE",
-      "intersections_count": r && r.intersections ? r.intersections.length : 0
-    };
-
-    var div = document.createElement('div');
-    div.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:#0a0d14;color:#fff;z-index:999999;padding:20px;overflow:auto;font-family:monospace;font-size:13px;line-height:1.8;';
-
-    var html = '<h2 style="color:#fbbf24;margin-bottom:15px;">📊 DEBUG DATA</h2>';
-    html += '<pre style="white-space:pre-wrap;word-break:break-all;color:#e8e8e8;">' + JSON.stringify(out, null, 2) + '</pre>';
-    html += '<button onclick="this.parentElement.remove()" style="margin-top:20px;padding:15px 30px;background:#fbbf24;color:#000;border:none;border-radius:8px;font-weight:bold;font-size:16px;width:100%;">CLOSE</button>';
-
-    div.innerHTML = html;
-    document.body.appendChild(div);
-  }, 3000);
-  </script>
-
-
 </body>
 </html>
