@@ -1,36 +1,40 @@
 /* =========================================================
    3D.JS
-   MASTER CONNECTED SHEET VIEW V7
+   FOLDED SHEET VIEW V8
    ---------------------------------------------------------
    GeometryEngine = BRAIN
-   ThreeD = VISUAL SIMULATOR
+   ThreeD         = SIRF DIKHANE WALA (visual)
 
    IMPORTANT:
-   This file does NOT calculate bend allowance,
-   bend deduction, angle or cup-cut decisions.
+   Ye file koi bend / angle / cup-cut calculation nahi karti.
+   Sab kuch GeometryEngine.analyze() ke `fold` data se aata hai:
 
-   Everything comes from:
-       GeometryEngine.analyze()
+       data.fold.panels    : mudi hui sheet ke panels (3D points)
+       data.fold.corners   : corner cut / miter line ki jagah
+       data.fold.profiles  : length aur depth ka cross-section
+       data.fold.bounds    : poore piece ka size
 
-   3D responsibilities:
-       - build connected sheet panels
-       - show thickness
-       - show bend direction
-       - show bend radius visually
-       - show cup-cut positions
-       - rotate / zoom
-       - wireframe
-       - auto rotate
+   Kya dikhata hai:
+       - finished piece (finish side upar)
+       - flange ke label (L2 2" / D4 8")
+       - corner pe miter line (peeli) ya poora corner cut (laal)
+       - length side aur depth side ka cross-section (neeche)
+       - ghumana, pinch zoom, wireframe, auto rotate
 
+   Public API purana hi hai (init, draw, resize, render, reset,
+   resetView, setWireframe, setAutoRotate, getMasterData,
+   startAnimation) + setLabels.
    ========================================================= */
 
 (function () {
 
   "use strict";
 
+  var UNIT = 10;   /* 1 inch = 10 three.js units */
+
 
   /* =========================================================
-     THREE.JS STATE
+     STATE
      ========================================================= */
 
   var scene = null;
@@ -39,17 +43,27 @@
 
   var canvas3dEl = null;
 
-  var masterGroup = null;
-  var sheetGroup = null;
-  var bendGroup = null;
-  var cutGroup = null;
-  var helperGroup = null;
+  var masterGroup = null;   /* ghumne wala */
+  var modelGroup = null;    /* andar, center pe rakha hua */
+  var labelGroup = null;
 
   var animationId = null;
-
   var initialized = false;
+  var viewSet = false;
 
   var masterData = null;
+
+  var modelRadius = 100;
+
+  var msgEl = null;
+  var infoEl = null;
+  var sectionsEl = null;
+  var secCanvasL = null;
+  var secCanvasD = null;
+  var secLabelL = null;
+  var secLabelD = null;
+
+  var materials = {};
 
 
   /* =========================================================
@@ -60,87 +74,129 @@
     return document.getElementById(id);
   }
 
-
   function num(v, fallback) {
-
-    var n =
-      parseFloat(v);
-
-    return Number.isFinite(n)
-      ? n
-      : (fallback || 0);
+    var n = parseFloat(v);
+    return Number.isFinite(n) ? n : (fallback || 0);
   }
 
-
-  function mmTo3D(mm) {
-
-    /*
-       Visual scale.
-
-       10 Three.js units ≈ 1 inch
-       because fabrication dimensions are
-       primarily inch based.
-    */
-
-    return num(mm) *
-      0.3937007874 *
-      10;
+  function clamp(v, a, b) {
+    return Math.max(a, Math.min(b, v));
   }
-
-
-  function inchTo3D(inch) {
-
-    return num(inch) * 10;
-  }
-
 
   function getState() {
+    return window.AppState || window.state || {};
+  }
 
-    return (
-      window.AppState ||
-      window.state ||
-      {}
-    );
+  function gcd(a, b) {
+    return b ? gcd(b, a % b) : a;
+  }
+
+  /* 1/16 inch tak fraction: 2.5 -> 2 1/2" */
+  function fmtInch(v) {
+
+    var x = Math.max(0, num(v));
+
+    var w = Math.floor(x + 1e-9);
+    var f = Math.round((x - w) * 16);
+
+    if (f === 16) { w += 1; f = 0; }
+
+    var s = "";
+
+    if (w > 0) { s += w; }
+
+    if (f > 0) {
+      var g = gcd(f, 16);
+      s += (w > 0 ? " " : "") + (f / g) + "/" + (16 / g);
+    }
+
+    if (!s) { s = "0"; }
+
+    return s + '"';
+  }
+
+  function view() {
+
+    if (!window.view3d) {
+      window.view3d = {
+        rotX: -25,
+        rotY: 35,
+        dist: 900,
+        autoRotate: false,
+        wireframe: false
+      };
+    }
+
+    if (window.view3d.zoom == null) { window.view3d.zoom = 1; }
+    if (window.view3d.labels == null) { window.view3d.labels = true; }
+
+    return window.view3d;
   }
 
 
   /* =========================================================
-     GET MASTER GEOMETRY
+     MASTER DATA
      ========================================================= */
 
   function getMasterData() {
 
     if (
       !window.GeometryEngine ||
-      typeof window.GeometryEngine.analyze !==
-      "function"
+      typeof window.GeometryEngine.analyze !== "function"
     ) {
-
-      console.error(
-        "3D: GeometryEngine unavailable"
-      );
-
+      console.error("3D: GeometryEngine unavailable");
       return null;
     }
 
     try {
-
-      masterData =
-        window.GeometryEngine.analyze(
-          getState()
-        );
-
+      masterData = window.GeometryEngine.analyze(getState());
       return masterData;
-
     } catch (err) {
-
-      console.error(
-        "3D: GeometryEngine failed",
-        err
-      );
-
+      console.error("3D: GeometryEngine failed", err);
       return null;
     }
+  }
+
+
+  /* =========================================================
+     MESSAGE OVERLAY (jab 3D nahi ban sakta)
+     ========================================================= */
+
+  function ensureOverlay() {
+
+    if (!canvas3dEl) { return; }
+
+    if (msgEl) {
+      if (msgEl.parentNode !== canvas3dEl) { canvas3dEl.appendChild(msgEl); }
+      return;
+    }
+
+    canvas3dEl.style.position = "relative";
+
+    msgEl = document.createElement("div");
+
+    msgEl.style.cssText =
+      "position:absolute;left:0;right:0;top:0;bottom:0;" +
+      "display:none;align-items:center;justify-content:center;" +
+      "text-align:center;padding:24px;color:#e8e8e8;" +
+      "font:14px/1.5 Arial,sans-serif;pointer-events:none;z-index:2;";
+
+    canvas3dEl.appendChild(msgEl);
+  }
+
+  function showMessage(text) {
+
+    ensureOverlay();
+
+    if (!msgEl) { return; }
+
+    msgEl.textContent = text;
+    msgEl.style.display = "flex";
+  }
+
+  function hideMessage() {
+
+    if (msgEl) { msgEl.style.display = "none"; }
   }
 
 
@@ -150,46 +206,33 @@
 
   function init() {
 
-    canvas3dEl =
-      $("canvas3d");
+    if (initialized) { return; }
+
+    canvas3dEl = $("canvas3d") || $("canvas3d-container");
 
     if (!canvas3dEl) {
-
-      /*
-         Some versions use a container
-         instead of canvas element.
-      */
-
-      canvas3dEl =
-        $("canvas3d-container");
-    }
-
-    if (!canvas3dEl) {
-
-      console.warn(
-        "3D: #canvas3d not found"
-      );
-
+      console.warn("3D: #canvas3d not found");
       return;
     }
 
-
-    if (
-      typeof THREE ===
-      "undefined"
-    ) {
-
-      console.error(
-        "3D: Three.js not loaded"
+    if (typeof THREE === "undefined") {
+      console.error("3D: Three.js not loaded");
+      showMessage(
+        "3D library load nahi hui. Ek baar internet pe app kholo, phir offline bhi chalega."
       );
-
       return;
     }
 
-
-    createScene();
+    try {
+      createScene();
+    } catch (err) {
+      console.error("3D: scene create failed", err);
+      showMessage("Is phone/browser me 3D (WebGL) nahi chal raha.");
+      return;
+    }
 
     bindControls();
+    createExtras();
 
     initialized = true;
 
@@ -198,236 +241,202 @@
 
 
   /* =========================================================
-     CREATE SCENE
+     SCENE
      ========================================================= */
 
   function createScene() {
 
-    scene =
-      new THREE.Scene();
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x111318);
 
-    scene.background =
-      new THREE.Color(
-        0x111318
-      );
+    var rect = canvas3dEl.getBoundingClientRect();
 
-
-    var rect =
-      canvas3dEl.getBoundingClientRect();
-
-
-    camera =
-      new THREE.PerspectiveCamera(
-        45,
-        Math.max(
-          1,
-          rect.width
-        ) /
-        Math.max(
-          1,
-          rect.height
-        ),
-        0.1,
-        100000
-      );
-
-
-    camera.position.set(
-      180,
-      150,
-      220
+    camera = new THREE.PerspectiveCamera(
+      45,
+      Math.max(1, rect.width) / Math.max(1, rect.height),
+      0.5,
+      200000
     );
 
+    camera.position.set(0, 0, 400);
 
-    renderer =
-      new THREE.WebGLRenderer({
-        antialias: true,
-        alpha: false
-      });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 
-
-    renderer.setPixelRatio(
-      window.devicePixelRatio || 1
-    );
+    renderer.setPixelRatio(window.devicePixelRatio || 1);
 
     renderer.setSize(
-      Math.max(
-        300,
-        rect.width
-      ),
-      Math.max(
-        300,
-        rect.height
-      )
+      Math.max(300, rect.width),
+      Math.max(300, rect.height)
     );
 
-
-    /*
-       If #canvas3d is a container,
-       append renderer canvas.
-    */
-
-    if (
-      canvas3dEl.tagName !==
-      "CANVAS"
-    ) {
-
-      canvas3dEl.innerHTML =
-        "";
-
-      canvas3dEl.appendChild(
-        renderer.domElement
-      );
+    if (canvas3dEl.tagName !== "CANVAS") {
+      canvas3dEl.innerHTML = "";
+      canvas3dEl.appendChild(renderer.domElement);
     }
 
+    scene.add(new THREE.AmbientLight(0xffffff, 1.3));
 
-    /*
-       Lighting
-    */
+    var key = new THREE.DirectionalLight(0xffffff, 2.0);
+    key.position.set(300, 500, 400);
+    scene.add(key);
 
-    var ambient =
-      new THREE.AmbientLight(
-        0xffffff,
-        1.5
-      );
+    var fill = new THREE.DirectionalLight(0xffffff, 1.0);
+    fill.position.set(-300, 200, -300);
+    scene.add(fill);
 
-    scene.add(
-      ambient
-    );
+    masterGroup = new THREE.Group();
+    modelGroup = new THREE.Group();
+    labelGroup = new THREE.Group();
 
+    modelGroup.add(labelGroup);
+    masterGroup.add(modelGroup);
+    scene.add(masterGroup);
 
-    var key =
-      new THREE.DirectionalLight(
-        0xffffff,
-        2.0
-      );
+    window.addEventListener("resize", function () {
+      resize();
+      render();
+    });
 
-    key.position.set(
-      300,
-      500,
-      400
-    );
-
-    scene.add(
-      key
-    );
-
-
-    var fill =
-      new THREE.DirectionalLight(
-        0xffffff,
-        1.0
-      );
-
-    fill.position.set(
-      -300,
-      200,
-      -300
-    );
-
-    scene.add(
-      fill
-    );
-
-
-    masterGroup =
-      new THREE.Group();
-
-    sheetGroup =
-      new THREE.Group();
-
-    bendGroup =
-      new THREE.Group();
-
-    cutGroup =
-      new THREE.Group();
-
-    helperGroup =
-      new THREE.Group();
-
-
-    masterGroup.add(
-      sheetGroup
-    );
-
-    masterGroup.add(
-      bendGroup
-    );
-
-    masterGroup.add(
-      cutGroup
-    );
-
-    masterGroup.add(
-      helperGroup
-    );
-
-    scene.add(
-      masterGroup
-    );
-
-
-    /*
-       Ground reference
-    */
-
-    createGround();
-
-
-    window.addEventListener(
-      "resize",
-      resize
-    );
+    if (typeof ResizeObserver !== "undefined") {
+      try {
+        new ResizeObserver(function () {
+          resize();
+          render();
+        }).observe(canvas3dEl);
+      } catch (e) { /* ignore */ }
+    }
   }
 
 
   /* =========================================================
-     GROUND
+     EXTRA UI (info line + cross-sections + buttons)
+     ---------------------------------------------------------
+     index.html ko chhedna nahi padta, sab yahin se banta hai.
      ========================================================= */
 
-  function createGround() {
+  function createExtras() {
 
-    var geometry =
-      new THREE.PlaneGeometry(
-        1000,
-        1000
-      );
+    var host = canvas3dEl.parentNode;
 
-    var material =
-      new THREE.MeshStandardMaterial({
-        color: 0x17191e,
-        side: THREE.DoubleSide
-      });
+    if (!host) { return; }
 
-    var ground =
-      new THREE.Mesh(
-        geometry,
-        material
-      );
+    /* legend badlo */
+    var legend = host.querySelector(".legend");
 
-    ground.rotation.x =
-      -Math.PI / 2;
+    if (legend) {
+      legend.textContent =
+        "⬜ Top (finish side) · 🔷 mudi hui flange · 🟡 miter line · 🔴 poora corner cut · 🟠 check karo";
+    }
 
-    ground.position.y =
-      -3;
+    /* info line */
+    infoEl = document.createElement("div");
+    infoEl.style.cssText =
+      "margin:8px 0 4px;color:#fbbf24;font:600 13px/1.4 Arial,sans-serif;";
 
-    helperGroup.add(
-      ground
-    );
+    host.insertBefore(infoEl, canvas3dEl.nextSibling);
+
+    /* cross-sections */
+    sectionsEl = document.createElement("div");
+    sectionsEl.style.cssText = "margin:6px 0 10px;";
+
+    function box(title) {
+
+      var wrap = document.createElement("div");
+      wrap.style.cssText =
+        "background:#0a0d14;border:1px solid #2a2f3a;border-radius:8px;" +
+        "padding:6px 8px;margin-bottom:8px;";
+
+      var t = document.createElement("div");
+      t.textContent = title;
+      t.style.cssText = "color:#e8e8e8;font:600 12px Arial,sans-serif;";
+
+      var c = document.createElement("canvas");
+      c.style.cssText = "width:100%;height:130px;display:block;";
+
+      var l = document.createElement("div");
+      l.style.cssText =
+        "color:#fbbf24;font:11px/1.4 Arial,sans-serif;margin-top:2px;";
+
+      wrap.appendChild(t);
+      wrap.appendChild(c);
+      wrap.appendChild(l);
+      sectionsEl.appendChild(wrap);
+
+      return { canvas: c, label: l };
+    }
+
+    var bl = box("LENGTH side — cross-section (finish side upar)");
+    var bd = box("DEPTH side — cross-section (finish side upar)");
+
+    secCanvasL = bl.canvas;
+    secLabelL = bl.label;
+    secCanvasD = bd.canvas;
+    secLabelD = bd.label;
+
+    host.insertBefore(sectionsEl, infoEl.nextSibling);
+
+    /* labels button */
+    var rows = host.querySelectorAll(".view-controls");
+    var lastRow = rows.length ? rows[rows.length - 1] : null;
+
+    if (lastRow && !$("btn-labels-3d")) {
+
+      var b = document.createElement("button");
+
+      b.type = "button";
+      b.className = "btn btn-secondary";
+      b.id = "btn-labels-3d";
+      b.textContent = "🏷 Label";
+
+      lastRow.appendChild(b);
+    }
+
+    wireButtons();
+  }
 
 
-    var grid =
-      new THREE.GridHelper(
-        1000,
-        50
-      );
+  function wireButtons() {
 
-    grid.position.y =
-      -2.8;
+    function on(id, fn) {
 
-    helperGroup.add(
-      grid
-    );
+      var el = $(id);
+
+      if (!el || el.getAttribute("data-bound3d")) { return; }
+
+      el.setAttribute("data-bound3d", "1");
+      el.addEventListener("click", fn);
+    }
+
+    on("btn-zoom-in-3d", function () { zoomBy(0.8); });
+    on("btn-zoom-out-3d", function () { zoomBy(1.25); });
+    on("btn-reset-3d", function () { resetView(); });
+
+    on("btn-wireframe", function () {
+      setWireframe(!view().wireframe);
+    });
+
+    on("btn-auto-rotate", function () {
+      setAutoRotate(!view().autoRotate);
+    });
+
+    on("btn-labels-3d", function () {
+      setLabels(!view().labels);
+    });
+
+    syncButtons();
+  }
+
+
+  function syncButtons() {
+
+    function mark(id, state) {
+      var el = $(id);
+      if (el) { el.classList.toggle("active", !!state); }
+    }
+
+    mark("btn-wireframe", view().wireframe);
+    mark("btn-auto-rotate", view().autoRotate);
+    mark("btn-labels-3d", view().labels);
   }
 
 
@@ -437,84 +446,435 @@
 
   function resize() {
 
-    if (
-      !renderer ||
-      !camera ||
-      !canvas3dEl
-    ) {
-      return;
-    }
+    if (!renderer || !camera || !canvas3dEl) { return; }
 
-    var rect =
-      canvas3dEl.getBoundingClientRect();
+    var rect = canvas3dEl.getBoundingClientRect();
 
-    var width =
-      Math.max(
-        300,
-        rect.width
-      );
+    if (rect.width < 10 || rect.height < 10) { return; }
 
-    var height =
-      Math.max(
-        300,
-        rect.height
-      );
-
-    camera.aspect =
-      width / height;
-
+    camera.aspect = rect.width / rect.height;
     camera.updateProjectionMatrix();
 
-    renderer.setSize(
-      width,
-      height
-    );
+    renderer.setSize(rect.width, rect.height);
   }
 
 
   /* =========================================================
-     CLEAR MASTER
+     CLEAR
      ========================================================= */
 
-  function clearMaster() {
+  function disposeObject(obj) {
 
-    if (sheetGroup) {
+    if (obj.geometry && obj.geometry.dispose) { obj.geometry.dispose(); }
 
-      while (
-        sheetGroup.children.length
-      ) {
-
-        sheetGroup.remove(
-          sheetGroup.children[0]
-        );
-      }
+    if (obj.material && obj.material.map && obj.material.map.dispose) {
+      obj.material.map.dispose();
     }
 
+    if (obj.material && obj.userData && obj.userData.ownMaterial) {
+      obj.material.dispose();
+    }
+  }
 
-    if (bendGroup) {
+  function clearGroup(group) {
 
-      while (
-        bendGroup.children.length
-      ) {
+    while (group.children.length) {
+      var c = group.children[0];
+      group.remove(c);
+      disposeObject(c);
+    }
+  }
 
-        bendGroup.remove(
-          bendGroup.children[0]
-        );
+  function clearModel() {
+
+    if (!modelGroup) { return; }
+
+    modelGroup.children.slice().forEach(function (c) {
+      if (c === labelGroup) { return; }
+      modelGroup.remove(c);
+      disposeObject(c);
+    });
+
+    clearGroup(labelGroup);
+  }
+
+
+  /* =========================================================
+     MATERIALS
+     ========================================================= */
+
+  function mat(name, make) {
+
+    if (!materials[name]) { materials[name] = make(); }
+
+    return materials[name];
+  }
+
+  function finishMat(kind) {
+
+    var color =
+      kind === "BASE" ? 0xdfe6ea
+      : kind === "L_FLANGE" ? 0xa9c3d6
+      : 0x9fb8cc;
+
+    return mat("finish_" + kind, function () {
+      return new THREE.MeshStandardMaterial({
+        color: color,
+        side: THREE.FrontSide,
+        metalness: 0.25,
+        roughness: 0.5,
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1
+      });
+    });
+  }
+
+  function markMat() {
+
+    return mat("marking", function () {
+      return new THREE.MeshStandardMaterial({
+        color: 0x6b7480,
+        side: THREE.BackSide,
+        metalness: 0.1,
+        roughness: 0.8,
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1
+      });
+    });
+  }
+
+
+  /* =========================================================
+     FOLD -> THREE COORDINATES
+     ---------------------------------------------------------
+     fold (x, y, z)  ->  three (X = x, Y = z, Z = -y)
+     (ghumav sahi rehta hai, mirror nahi hota)
+     ========================================================= */
+
+  function toThree(p) {
+    return [p[0] * UNIT, p[2] * UNIT, -p[1] * UNIT];
+  }
+
+  function dist3(a, b) {
+    return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  }
+
+  function cleanPoly(points) {
+
+    var out = [];
+
+    points.forEach(function (p) {
+
+      if (!out.length || dist3(out[out.length - 1], p) > 1e-6) {
+        out.push(p);
       }
+    });
+
+    if (out.length > 1 && dist3(out[0], out[out.length - 1]) <= 1e-6) {
+      out.pop();
     }
 
+    return out;
+  }
 
-    if (cutGroup) {
+  function polyNormal(pts) {
 
-      while (
-        cutGroup.children.length
-      ) {
+    var nx = 0, ny = 0, nz = 0;
 
-        cutGroup.remove(
-          cutGroup.children[0]
+    for (var i = 0; i < pts.length; i++) {
+
+      var p = pts[i];
+      var q = pts[(i + 1) % pts.length];
+
+      nx += (p[1] - q[1]) * (p[2] + q[2]);
+      ny += (p[2] - q[2]) * (p[0] + q[0]);
+      nz += (p[0] - q[0]) * (p[1] + q[1]);
+    }
+
+    return [nx, ny, nz];
+  }
+
+
+  /* =========================================================
+     BUILD PANELS
+     ========================================================= */
+
+  function buildPanels(fold, allPts) {
+
+    fold.panels.forEach(function (panel) {
+
+      var pts = cleanPoly(panel.polygon.map(toThree));
+
+      if (pts.length < 3) { return; }
+
+      var n = polyNormal(pts);
+
+      if (Math.hypot(n[0], n[1], n[2]) < 1e-9) { return; }
+
+      /* finish side jis taraf ho, wahi front face bane */
+      var fn = panel.finishNormal || [0, 0, 1];
+      var f3 = [fn[0], fn[2], -fn[1]];
+
+      var dotv = n[0] * f3[0] + n[1] * f3[1] + n[2] * f3[2];
+
+      if (dotv < 0) { pts.reverse(); }
+
+      var pos = [];
+
+      for (var i = 1; i < pts.length - 1; i++) {
+        pos.push(
+          pts[0][0], pts[0][1], pts[0][2],
+          pts[i][0], pts[i][1], pts[i][2],
+          pts[i + 1][0], pts[i + 1][1], pts[i + 1][2]
         );
       }
-    }
+
+      var geo = new THREE.BufferGeometry();
+
+      geo.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(pos, 3)
+      );
+
+      geo.computeVertexNormals();
+
+      var meshF = new THREE.Mesh(geo, finishMat(panel.kind));
+      var meshM = new THREE.Mesh(geo, markMat());
+
+      meshF.userData = { panelId: panel.id };
+
+      modelGroup.add(meshM);
+      modelGroup.add(meshF);
+
+      /* kinare */
+      var edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(geo, 1),
+        mat("edge", function () {
+          return new THREE.LineBasicMaterial({ color: 0x1b2733 });
+        })
+      );
+
+      modelGroup.add(edges);
+
+      pts.forEach(function (p) { allPts.push(p); });
+    });
+  }
+
+
+  /* =========================================================
+     CORNERS (miter line / poora cut / check)
+     ========================================================= */
+
+  function addCylinder(a, b, radius, color) {
+
+    var len = dist3(a, b);
+
+    if (len < 1e-6) { return; }
+
+    var geo = new THREE.CylinderGeometry(radius, radius, len, 8);
+
+    var m = new THREE.Mesh(
+      geo,
+      new THREE.MeshBasicMaterial({ color: color })
+    );
+
+    m.userData = { ownMaterial: true };
+
+    m.position.set(
+      (a[0] + b[0]) / 2,
+      (a[1] + b[1]) / 2,
+      (a[2] + b[2]) / 2
+    );
+
+    var dir = new THREE.Vector3(
+      b[0] - a[0],
+      b[1] - a[1],
+      b[2] - a[2]
+    ).normalize();
+
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+
+    modelGroup.add(m);
+  }
+
+  function addSphere(p, radius, color) {
+
+    var m = new THREE.Mesh(
+      new THREE.SphereGeometry(radius, 12, 10),
+      new THREE.MeshBasicMaterial({ color: color })
+    );
+
+    m.userData = { ownMaterial: true };
+    m.position.set(p[0], p[1], p[2]);
+
+    modelGroup.add(m);
+  }
+
+  function buildCorners(fold) {
+
+    fold.corners.forEach(function (c) {
+
+      if (!c.world) { return; }
+
+      var o = toThree(c.world.origin);
+
+      if (c.world.hipEnd) {
+        addCylinder(o, toThree(c.world.hipEnd), 0.35, 0xfbbf24);
+      }
+
+      if (c.mode === "FULL") {
+        addSphere(o, 1.0, 0xe53935);
+      }
+
+      if (c.needsCheck) {
+        addSphere(o, 1.5, 0xff9800);
+      }
+    });
+  }
+
+
+  /* =========================================================
+     LABELS
+     ========================================================= */
+
+  function makeLabel(text, height) {
+
+    var cv = document.createElement("canvas");
+
+    var ctx = cv.getContext("2d");
+
+    var fs = 44;
+
+    ctx.font = "bold " + fs + "px Arial";
+
+    var w = Math.ceil(ctx.measureText(text).width) + 28;
+
+    cv.width = w;
+    cv.height = fs + 22;
+
+    ctx = cv.getContext("2d");
+
+    ctx.fillStyle = "rgba(10,13,20,0.78)";
+    ctx.fillRect(0, 0, cv.width, cv.height);
+
+    ctx.font = "bold " + fs + "px Arial";
+    ctx.fillStyle = "#fbbf24";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, 14, cv.height / 2 + 2);
+
+    var tex = new THREE.CanvasTexture(cv);
+
+    var sp = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: tex,
+        depthTest: false,
+        transparent: true
+      })
+    );
+
+    sp.userData = { ownMaterial: true };
+    sp.renderOrder = 10;
+    sp.scale.set(height * (cv.width / cv.height), height, 1);
+
+    return sp;
+  }
+
+  function sizeOfLine(data, id) {
+
+    var found = null;
+
+    (data.lengthLines || []).concat(data.depthLines || []).forEach(function (l) {
+      if (l.id === id) { found = l; }
+    });
+
+    return found ? found.sizeInch : null;
+  }
+
+  function buildLabels(data, fold) {
+
+    if (!view().labels) { return; }
+
+    var h = Math.max(4, modelRadius * 0.075);
+
+    fold.panels.forEach(function (panel) {
+
+      var pts = cleanPoly(panel.polygon.map(toThree));
+
+      if (pts.length < 3) { return; }
+
+      var cx = 0, cy = 0, cz = 0;
+
+      pts.forEach(function (p) { cx += p[0]; cy += p[1]; cz += p[2]; });
+
+      cx /= pts.length; cy /= pts.length; cz /= pts.length;
+
+      var fn = panel.finishNormal || [0, 0, 1];
+      var f3 = [fn[0], fn[2], -fn[1]];
+
+      var text;
+
+      if (panel.kind === "BASE") {
+        text = panel.lengthId + " x " + panel.depthId + "  " +
+          fmtInch(fold.widthInch) + " x " + fmtInch(fold.heightInch);
+      } else {
+        var id = panel.kind === "L_FLANGE" ? panel.lengthId : panel.depthId;
+        var sz = sizeOfLine(data, id);
+        text = id + (sz != null ? "  " + fmtInch(sz) : "");
+      }
+
+      var sp = makeLabel(text, h);
+
+      var lift = UNIT * 0.4;
+
+      sp.position.set(
+        cx + f3[0] * lift,
+        cy + f3[1] * lift,
+        cz + f3[2] * lift
+      );
+
+      labelGroup.add(sp);
+    });
+  }
+
+
+  /* =========================================================
+     CENTER + GRID
+     ========================================================= */
+
+  function centerModel(allPts) {
+
+    if (!allPts.length) { return; }
+
+    var mn = [Infinity, Infinity, Infinity];
+    var mx = [-Infinity, -Infinity, -Infinity];
+
+    allPts.forEach(function (p) {
+      for (var a = 0; a < 3; a++) {
+        mn[a] = Math.min(mn[a], p[a]);
+        mx[a] = Math.max(mx[a], p[a]);
+      }
+    });
+
+    var c = [
+      (mn[0] + mx[0]) / 2,
+      (mn[1] + mx[1]) / 2,
+      (mn[2] + mx[2]) / 2
+    ];
+
+    modelGroup.position.set(-c[0], -c[1], -c[2]);
+
+    var r = 0;
+
+    allPts.forEach(function (p) {
+      r = Math.max(
+        r,
+        Math.hypot(p[0] - c[0], p[1] - c[1], p[2] - c[2])
+      );
+    });
+
+    modelRadius = Math.max(r, 20);
   }
 
 
@@ -524,42 +884,82 @@
 
   function draw() {
 
+    if (!initialized) {
+
+      init();
+
+      if (!initialized) { return; }
+
+      /* init() khud draw() bula chuka hai */
+      return;
+    }
+
+    resize();
+
+    var data = getMasterData();
+
+    clearModel();
+
     if (
-      !initialized ||
-      !scene ||
-      !renderer
+      !data ||
+      !data.fold ||
+      !data.fold.valid ||
+      !data.fold.panels.length
     ) {
+
+      showMessage(
+        "3D dikhane ke liye Length aur Depth dono side ki lines daalo."
+      );
+
+      drawSection(secCanvasL, null);
+      drawSection(secCanvasD, null);
+
+      if (infoEl) { infoEl.textContent = ""; }
+      if (secLabelL) { secLabelL.textContent = ""; }
+      if (secLabelD) { secLabelD.textContent = ""; }
+
+      render();
       return;
     }
 
-    var data =
-      getMasterData();
+    hideMessage();
 
-    if (!data) {
-      return;
-    }
+    var fold = data.fold;
 
-    masterData =
-      data;
+    var allPts = [];
 
-    clearMaster();
+    buildPanels(fold, allPts);
 
-    buildConnectedSheet(
-      data
-    );
+    centerModel(allPts);
 
-    buildBendMarkers(
-      data
-    );
+    buildCorners(fold);
 
-    buildPhysicalCuts(
-      data
-    );
+    buildLabels(data, fold);
 
     applyWireframe();
 
-    fitCamera(
-      data
+    if (!viewSet) {
+      setDefaultView();
+    }
+
+    fitCamera();
+
+    updateInfo(data, fold);
+
+    drawSection(
+      secCanvasL,
+      fold.profiles.length,
+      secLabelL,
+      data,
+      "length"
+    );
+
+    drawSection(
+      secCanvasD,
+      fold.profiles.depth,
+      secLabelD,
+      data,
+      "depth"
     );
 
     render();
@@ -567,835 +967,137 @@
 
 
   /* =========================================================
-     MASTER CONNECTED SHEET
+     INFO LINE
      ========================================================= */
 
-  function buildConnectedSheet(
-    data
-  ) {
+  function updateInfo(data, fold) {
 
-    var sheet =
-      data.sheet;
+    if (!infoEl) { return; }
 
-    if (!sheet) {
-      return;
-    }
+    var minZ = fold.bounds.min[2];
+    var maxZ = fold.bounds.max[2];
 
+    var parts = [
+      "Top " + fmtInch(fold.widthInch) + " x " + fmtInch(fold.heightInch)
+    ];
 
-    var thickness =
-      num(
-        data.settings &&
-        data.settings.thickness,
-        0.8
-      );
+    if (minZ < -1e-6) { parts.push("neeche " + fmtInch(-minZ)); }
+    if (maxZ > 1e-6) { parts.push("upar " + fmtInch(maxZ)); }
 
+    var cuts = data.cuts ? data.cuts.length : 0;
 
-    /*
-       Base flat sheet.
+    parts.push(cuts + " corner cut");
 
-       This is the master developed sheet
-       from GeometryEngine.
+    var check = data.cuts
+      ? data.cuts.filter(function (c) { return c.needsCheck; }).length
+      : 0;
 
-       Individual bend panels are created
-       from GeometryEngine line positions.
-    */
+    if (check) { parts.push("🟠 " + check + " corner check karo"); }
 
-    var width =
-      inchTo3D(
-        sheet.widthInch
-      );
-
-    var depth =
-      inchTo3D(
-        sheet.heightInch
-      );
-
-    var t =
-      mmTo3D(
-        thickness
-      );
+    infoEl.textContent = parts.join("  ·  ");
+  }
 
 
-    /*
-       Main sheet.
+  /* =========================================================
+     CROSS-SECTIONS (2D)
+     ========================================================= */
 
-       It is kept as ONE connected body
-       instead of unrelated boxes.
-    */
+  function drawSection(canvas, profile, labelEl, data, side) {
 
-    var geometry =
-      new THREE.BoxGeometry(
-        width,
-        t,
-        depth
-      );
+    if (!canvas) { return; }
 
+    var dpr = window.devicePixelRatio || 1;
 
-    var material =
-      new THREE.MeshStandardMaterial({
+    var w = canvas.clientWidth || 300;
+    var h = canvas.clientHeight || 130;
 
-        color:
-          0xc8cdd2,
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
 
-        metalness:
-          0.85,
+    var ctx = canvas.getContext("2d");
 
-        roughness:
-          0.28,
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
 
-        side:
-          THREE.DoubleSide
+    if (!profile || !profile.length) { return; }
+
+    var minX = Infinity, maxX = -Infinity;
+    var minZ = Infinity, maxZ = -Infinity;
+
+    profile.forEach(function (s) {
+      [s.a, s.b].forEach(function (p) {
+        minX = Math.min(minX, p[0]);
+        maxX = Math.max(maxX, p[0]);
+        minZ = Math.min(minZ, p[1]);
+        maxZ = Math.max(maxZ, p[1]);
       });
-
-
-    var sheetMesh =
-      new THREE.Mesh(
-        geometry,
-        material
-      );
-
-
-    /*
-       Put sheet around origin.
-    */
-
-    sheetMesh.position.set(
-      width / 2,
-      0,
-      depth / 2
-    );
-
-
-    sheetGroup.add(
-      sheetMesh
-    );
-
-
-    /*
-       Add actual bend zones / raised
-       visual panels.
-    */
-
-    buildBendPanels(
-      data,
-      t
-    );
-  }
-
-
-  /* =========================================================
-     BEND PANELS
-     ========================================================= */
-
-  function buildBendPanels(
-    data,
-    thickness3D
-  ) {
-
-    var lengthLines =
-      data.flat &&
-      data.flat.lengthLines
-        ? data.flat.lengthLines
-        : [];
-
-    var depthLines =
-      data.flat &&
-      data.flat.depthLines
-        ? data.flat.depthLines
-        : [];
-
-
-    /*
-       Length-side bend panels
-    */
-
-    lengthLines.forEach(
-      function (line) {
-
-        if (
-          !line.isBend
-        ) {
-          return;
-        }
-
-        buildLengthPanel(
-          line,
-          data,
-          thickness3D
-        );
-      }
-    );
-
-
-    /*
-       Depth-side bend panels
-    */
-
-    depthLines.forEach(
-      function (line) {
-
-        if (
-          !line.isBend
-        ) {
-          return;
-        }
-
-        buildDepthPanel(
-          line,
-          data,
-          thickness3D
-        );
-      }
-    );
-  }
-
-
-  /* =========================================================
-     LENGTH PANEL
-     ========================================================= */
-
-  function buildLengthPanel(
-    line,
-    data,
-    thickness3D
-  ) {
-
-    var x =
-      inchTo3D(
-        line.bendCenterInch
-      );
-
-    var width =
-      Math.max(
-        1,
-        mmTo3D(
-          Math.max(
-            line.radiusMM,
-            line.thicknessMM
-          )
-        )
-      );
-
-
-    /*
-       Panel visual.
-
-       The center stays connected to
-       the master sheet.
-    */
-
-    var height =
-      Math.max(
-        1,
-        inchTo3D(
-          data.sheet.heightInch
-        )
-      );
-
-
-    var geometry =
-      new THREE.BoxGeometry(
-        width,
-        thickness3D,
-        height
-      );
-
-
-    var material =
-      createSheetMaterial();
-
-
-    var mesh =
-      new THREE.Mesh(
-        geometry,
-        material
-      );
-
-
-    mesh.position.set(
-      x,
-      0,
-      height / 2
-    );
-
-
-    /*
-       UP / DOWN visual orientation.
-
-       This is a visual bend indication.
-    */
-
-    var angle =
-      num(
-        line.effectiveAngle
-      );
-
-    var sign =
-      line.direction === "down"
-        ? -1
-        : 1;
-
-    mesh.rotation.z =
-      sign *
-      angle *
-      Math.PI /
-      180;
-
-
-    sheetGroup.add(
-      mesh
-    );
-  }
-
-
-  /* =========================================================
-     DEPTH PANEL
-     ========================================================= */
-
-  function buildDepthPanel(
-    line,
-    data,
-    thickness3D
-  ) {
-
-    var z =
-      inchTo3D(
-        line.bendCenterInch
-      );
-
-    var width =
-      Math.max(
-        1,
-        mmTo3D(
-          Math.max(
-            line.radiusMM,
-            line.thicknessMM
-          )
-        )
-      );
-
-
-    var sheetWidth =
-      Math.max(
-        1,
-        inchTo3D(
-          data.sheet.widthInch
-        )
-      );
-
-
-    var geometry =
-      new THREE.BoxGeometry(
-        sheetWidth,
-        thickness3D,
-        width
-      );
-
-
-    var material =
-      createSheetMaterial();
-
-
-    var mesh =
-      new THREE.Mesh(
-        geometry,
-        material
-      );
-
-
-    mesh.position.set(
-      sheetWidth / 2,
-      0,
-      z
-    );
-
-
-    var angle =
-      num(
-        line.effectiveAngle
-      );
-
-    var sign =
-      line.direction === "down"
-        ? -1
-        : 1;
-
-    mesh.rotation.x =
-      sign *
-      angle *
-      Math.PI /
-      180;
-
-
-    sheetGroup.add(
-      mesh
-    );
-  }
-
-
-  /* =========================================================
-     SHEET MATERIAL
-     ========================================================= */
-
-  function createSheetMaterial() {
-
-    return new THREE.MeshStandardMaterial({
-
-      color:
-        0xc8cdd2,
-
-      metalness:
-        0.88,
-
-      roughness:
-        0.25,
-
-      side:
-        THREE.DoubleSide
     });
-  }
 
+    var pad = 18;
 
-  /* =========================================================
-     BEND MARKERS
-     ========================================================= */
+    var spanX = Math.max(maxX - minX, 0.5);
+    var spanZ = Math.max(maxZ - minZ, 0.5);
 
-  function buildBendMarkers(
-    data
-  ) {
+    var sc = Math.min((w - 2 * pad) / spanX, (h - 2 * pad) / spanZ);
 
-    var lines =
-      [];
+    var ox = pad + ((w - 2 * pad) - spanX * sc) / 2;
+    var oy = pad + ((h - 2 * pad) - spanZ * sc) / 2;
 
-    if (
-      data.flat &&
-      data.flat.lengthLines
-    ) {
+    function X(x) { return ox + (x - minX) * sc; }
+    function Y(z) { return oy + (maxZ - z) * sc; }
 
-      lines =
-        lines.concat(
-          data.flat.lengthLines
-        );
-    }
+    ctx.lineCap = "round";
 
-    if (
-      data.flat &&
-      data.flat.depthLines
-    ) {
+    profile.forEach(function (s) {
 
-      lines =
-        lines.concat(
-          data.flat.depthLines
-        );
-    }
+      ctx.beginPath();
+      ctx.moveTo(X(s.a[0]), Y(s.a[1]));
+      ctx.lineTo(X(s.b[0]), Y(s.b[1]));
 
+      ctx.strokeStyle = s.base ? "#ffffff" : "#7fb2d9";
+      ctx.lineWidth = s.base ? 4 : 3;
+      ctx.stroke();
 
-    lines.forEach(
-      function (line) {
+      /* bade segment pe label */
+      var px = Math.hypot(
+        (s.b[0] - s.a[0]) * sc,
+        (s.b[1] - s.a[1]) * sc
+      );
 
-        if (
-          !line.isBend
-        ) {
-          return;
+      if (px > 34) {
+
+        var mx = (X(s.a[0]) + X(s.b[0])) / 2;
+        var my = (Y(s.a[1]) + Y(s.b[1])) / 2;
+
+        ctx.fillStyle = "#fbbf24";
+        ctx.font = "bold 10px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(s.id, mx, my - 6);
+      }
+    });
+
+    /* "finish upar" ka tir */
+    ctx.fillStyle = "#9aa5b1";
+    ctx.font = "10px Arial";
+    ctx.textAlign = "left";
+    ctx.fillText("finish side ↑", 6, 12);
+
+    if (labelEl && data) {
+
+      var lines = side === "length" ? data.lengthLines : data.depthLines;
+
+      labelEl.textContent = (lines || []).map(function (l) {
+
+        var tag = l.id + ": " + fmtInch(l.sizeInch);
+
+        if (l.isBend) {
+          tag += " (" + l.angle + "° " + (l.direction === "down" ? "DOWN" : "UP") + ")";
         }
 
-        buildBendMarker(
-          line,
-          data
-        );
-      }
-    );
-  }
+        return tag;
 
-
-  function buildBendMarker(
-    line,
-    data
-  ) {
-
-    var material =
-      new THREE.LineBasicMaterial({
-        color: 0xff3030
-      });
-
-
-    var points = [];
-
-
-    if (
-      line.side ===
-      "length"
-    ) {
-
-      var x =
-        inchTo3D(
-          line.bendCenterInch
-        );
-
-      var z1 =
-        0;
-
-      var z2 =
-        inchTo3D(
-          data.sheet.heightInch
-        );
-
-      points.push(
-        new THREE.Vector3(
-          x,
-          2,
-          z1
-        )
-      );
-
-      points.push(
-        new THREE.Vector3(
-          x,
-          2,
-          z2
-        )
-      );
-
-    } else {
-
-      var z =
-        inchTo3D(
-          line.bendCenterInch
-        );
-
-      var x1 =
-        0;
-
-      var x2 =
-        inchTo3D(
-          data.sheet.widthInch
-        );
-
-      points.push(
-        new THREE.Vector3(
-          x1,
-          2,
-          z
-        )
-      );
-
-      points.push(
-        new THREE.Vector3(
-          x2,
-          2,
-          z
-        )
-      );
+      }).join("   ");
     }
-
-
-    var geometry =
-      new THREE.BufferGeometry()
-        .setFromPoints(
-          points
-        );
-
-
-    var lineMesh =
-      new THREE.Line(
-        geometry,
-        material
-      );
-
-
-    bendGroup.add(
-      lineMesh
-    );
-
-
-    /*
-       Bend direction arrow
-    */
-
-    buildDirectionArrow(
-      line,
-      data
-    );
-  }
-
-
-  /* =========================================================
-     DIRECTION ARROW
-     ========================================================= */
-
-  function buildDirectionArrow(
-    line,
-    data
-  ) {
-
-    var origin;
-
-    if (
-      line.side ===
-      "length"
-    ) {
-
-      origin =
-        new THREE.Vector3(
-          inchTo3D(
-            line.bendCenterInch
-          ),
-          5,
-          inchTo3D(
-            data.sheet.heightInch / 2
-          )
-        );
-
-    } else {
-
-      origin =
-        new THREE.Vector3(
-          inchTo3D(
-            data.sheet.widthInch / 2
-          ),
-          5,
-          inchTo3D(
-            line.bendCenterInch
-          )
-        );
-    }
-
-
-    var dir =
-      new THREE.Vector3(
-        0,
-        line.direction === "down"
-          ? -1
-          : 1,
-        0
-      );
-
-
-    var arrow =
-      new THREE.ArrowHelper(
-        dir,
-        origin,
-        12,
-        0xff3030,
-        4,
-        2
-      );
-
-
-    bendGroup.add(
-      arrow
-    );
-  }
-
-
-  /* =========================================================
-     PHYSICAL CUTS
-     ========================================================= */
-
-  function buildPhysicalCuts(
-    data
-  ) {
-
-    var cuts =
-      data.cuts || [];
-
-
-    cuts.forEach(
-      function (cut) {
-
-        if (
-          isCutHidden(
-            cut
-          )
-        ) {
-          return;
-        }
-
-        buildCut(
-          cut,
-          data
-        );
-      }
-    );
-  }
-
-
-  function buildCut(
-    cut,
-    data
-  ) {
-
-    var width =
-      Math.max(
-        0.5,
-        inchTo3D(
-          cut.widthInch
-        )
-      );
-
-    var depth =
-      Math.max(
-        0.5,
-        inchTo3D(
-          cut.depthInch
-        )
-      );
-
-
-    /*
-       Red transparent physical cut marker.
-
-       NOTE:
-       Three.js does not yet boolean-subtract
-       the sheet in this version.
-
-       This is the master cut location and
-       size from GeometryEngine.
-    */
-
-    var geometry =
-      new THREE.BoxGeometry(
-        width,
-        3,
-        depth
-      );
-
-
-    var material =
-      new THREE.MeshBasicMaterial({
-
-        color:
-          0xff2020,
-
-        transparent:
-          true,
-
-        opacity:
-          0.72,
-
-        depthWrite:
-          false
-      });
-
-
-    var mesh =
-      new THREE.Mesh(
-        geometry,
-        material
-      );
-
-
-    mesh.position.set(
-
-      inchTo3D(
-        cut.xInch
-      ),
-
-      3,
-
-      inchTo3D(
-        cut.yInch
-      )
-    );
-
-
-    cutGroup.add(
-      mesh
-    );
-
-
-    /*
-       X marker
-    */
-
-    var points1 = [
-      new THREE.Vector3(
-        -width / 2,
-        4,
-        -depth / 2
-      ),
-      new THREE.Vector3(
-        width / 2,
-        4,
-        depth / 2
-      )
-    ];
-
-
-    var points2 = [
-      new THREE.Vector3(
-        width / 2,
-        4,
-        -depth / 2
-      ),
-      new THREE.Vector3(
-        -width / 2,
-        4,
-        depth / 2
-      )
-    ];
-
-
-    addCutLine(
-      points1
-    );
-
-    addCutLine(
-      points2
-    );
-  }
-
-
-  function addCutLine(
-    points
-  ) {
-
-    var geometry =
-      new THREE.BufferGeometry()
-        .setFromPoints(
-          points
-        );
-
-
-    var material =
-      new THREE.LineBasicMaterial({
-        color:
-          0xff2020
-      });
-
-
-    var line =
-      new THREE.Line(
-        geometry,
-        material
-      );
-
-
-    cutGroup.add(
-      line
-    );
-  }
-
-
-  function isCutHidden(
-    cut
-  ) {
-
-    if (!cut) {
-      return false;
-    }
-
-    if (cut.hidden) {
-      return true;
-    }
-
-    var hidden =
-      window.hiddenCuts ||
-      {};
-
-    return !!hidden[
-      cut.id
-    ];
   }
 
 
@@ -1405,342 +1107,185 @@
 
   function applyWireframe() {
 
-    var enabled =
-      !!(
-        window.view3d &&
-        window.view3d.wireframe
-      );
+    var enabled = !!(window.view3d && window.view3d.wireframe);
 
+    ["BASE", "L_FLANGE", "D_FLANGE"].forEach(function (k) {
+      finishMat(k).wireframe = enabled;
+    });
 
-    sheetGroup.traverse(
-      function (obj) {
-
-        if (
-          obj.material &&
-          obj.material.isMeshStandardMaterial
-        ) {
-
-          obj.material.wireframe =
-            enabled;
-        }
-      }
-    );
+    markMat().wireframe = enabled;
   }
 
 
   /* =========================================================
-     CAMERA FIT
+     CAMERA
      ========================================================= */
 
-  function fitCamera(
-    data
-  ) {
+  function setDefaultView() {
 
-    if (!camera) {
-      return;
-    }
+    if (!masterGroup) { return; }
 
-    var width =
-      inchTo3D(
-        num(
-          data.sheet &&
-          data.sheet.widthInch,
-          10
-        )
-      );
+    /* front se thoda side, upar se dekhta hua */
+    masterGroup.rotation.set(0.5, Math.PI + 0.55, 0);
 
-    var depth =
-      inchTo3D(
-        num(
-          data.sheet &&
-          data.sheet.heightInch,
-          10
-        )
-      );
-
-
-    var maxSize =
-      Math.max(
-        width,
-        depth,
-        50
-      );
-
-
-    var view =
-      window.view3d ||
-      {};
-
-
-    var rotX =
-      num(
-        view.rotX,
-        -25
-      );
-
-    var rotY =
-      num(
-        view.rotY,
-        35
-      );
-
-
-    var dist =
-      Math.max(
-        maxSize * 1.6,
-        num(
-          view.dist,
-          maxSize * 2
-        )
-      );
-
-
-    var rx =
-      rotX *
-      Math.PI /
-      180;
-
-    var ry =
-      rotY *
-      Math.PI /
-      180;
-
-
-    var target =
-      new THREE.Vector3(
-        width / 2,
-        0,
-        depth / 2
-      );
-
-
-    camera.position.set(
-
-      target.x +
-      Math.sin(ry) *
-      dist,
-
-      target.y +
-      Math.sin(-rx) *
-      dist,
-
-      target.z +
-      Math.cos(ry) *
-      dist
-    );
-
-
-    camera.lookAt(
-      target
-    );
+    viewSet = true;
   }
 
+  function fitCamera() {
 
-  /* =========================================================
-     RENDER
-     ========================================================= */
+    if (!camera) { return; }
 
-  function render() {
+    var fov = (camera.fov || 45) * Math.PI / 180;
 
-    if (
-      renderer &&
-      scene &&
-      camera
-    ) {
+    var base = modelRadius / Math.sin(fov / 2) * 1.1;
 
-      renderer.render(
-        scene,
-        camera
-      );
-    }
+    var z = clamp(num(view().zoom, 1), 0.15, 6);
+
+    camera.position.set(0, 0, base * z);
+    camera.lookAt(0, 0, 0);
+
+    camera.near = Math.max(0.5, base * 0.02);
+    camera.far = base * 20;
+    camera.updateProjectionMatrix();
+
   }
 
+  function zoomBy(factor) {
 
-  /* =========================================================
-     ANIMATION
-     ========================================================= */
+    view().zoom = clamp(num(view().zoom, 1) * factor, 0.15, 6);
 
-  function animate() {
-
-    animationId =
-      requestAnimationFrame(
-        animate
-      );
-
-
-    if (
-      window.view3d &&
-      window.view3d.autoRotate &&
-      masterGroup
-    ) {
-
-      masterGroup.rotation.y +=
-        0.008;
-    }
-
-
+    fitCamera();
     render();
   }
 
 
   /* =========================================================
-     CONTROLS
+     RENDER / ANIMATION
+     ========================================================= */
+
+  function render() {
+
+    if (renderer && scene && camera) {
+      renderer.render(scene, camera);
+    }
+  }
+
+  function animate() {
+
+    if (!view().autoRotate) {
+      animationId = null;
+      return;
+    }
+
+    animationId = requestAnimationFrame(animate);
+
+    if (masterGroup) { masterGroup.rotation.y += 0.008; }
+
+    render();
+  }
+
+  function startAnimation() {
+
+    if (!animationId && view().autoRotate) {
+      animate();
+    }
+  }
+
+
+  /* =========================================================
+     CONTROLS (ghumana + pinch zoom)
      ========================================================= */
 
   function bindControls() {
 
-    if (!canvas3dEl) {
-      return;
+    var target = renderer ? renderer.domElement : canvas3dEl;
+
+    var pointers = {};
+    var lastPinch = 0;
+
+    function count() {
+      return Object.keys(pointers).length;
     }
 
+    function pinchDist() {
 
-    var target =
-      renderer
-        ? renderer.domElement
-        : canvas3dEl;
+      var ids = Object.keys(pointers);
 
+      if (ids.length < 2) { return 0; }
 
-    var dragging = false;
+      var a = pointers[ids[0]];
+      var b = pointers[ids[1]];
 
-    var lastX = 0;
-    var lastY = 0;
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
 
+    target.style.touchAction = "none";
 
-    target.addEventListener(
-      "pointerdown",
-      function (e) {
+    target.addEventListener("pointerdown", function (e) {
 
-        dragging = true;
+      pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
 
-        lastX =
-          e.clientX;
+      lastPinch = pinchDist();
 
-        lastY =
-          e.clientY;
+      try { target.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    });
 
-        try {
+    target.addEventListener("pointermove", function (e) {
 
-          target.setPointerCapture(
-            e.pointerId
-          );
+      var p = pointers[e.pointerId];
 
-        } catch (_) {}
-      }
-    );
+      if (!p) { return; }
 
+      var dx = e.clientX - p.x;
+      var dy = e.clientY - p.y;
 
-    target.addEventListener(
-      "pointermove",
-      function (e) {
+      p.x = e.clientX;
+      p.y = e.clientY;
 
-        if (!dragging) {
-          return;
+      if (count() >= 2) {
+
+        var d = pinchDist();
+
+        if (lastPinch > 0 && d > 0) {
+          zoomBy(lastPinch / d);
         }
 
+        lastPinch = d;
 
-        var dx =
-          e.clientX -
-          lastX;
-
-        var dy =
-          e.clientY -
-          lastY;
-
-
-        masterGroup.rotation.y +=
-          dx * 0.01;
-
-        masterGroup.rotation.x +=
-          dy * 0.01;
-
-
-        lastX =
-          e.clientX;
-
-        lastY =
-          e.clientY;
-
-
-        render();
+        return;
       }
-    );
 
+      if (!masterGroup) { return; }
 
-    target.addEventListener(
-      "pointerup",
-      function (e) {
+      masterGroup.rotation.y += dx * 0.01;
+      masterGroup.rotation.x = clamp(
+        masterGroup.rotation.x + dy * 0.01,
+        -1.5,
+        1.5
+      );
 
-        dragging = false;
+      render();
+    });
 
-        try {
+    function end(e) {
 
-          target.releasePointerCapture(
-            e.pointerId
-          );
+      delete pointers[e.pointerId];
 
-        } catch (_) {}
-      }
-    );
+      lastPinch = pinchDist();
 
+      try { target.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    }
 
-    target.addEventListener(
-      "pointercancel",
-      function () {
-
-        dragging = false;
-      }
-    );
-
+    target.addEventListener("pointerup", end);
+    target.addEventListener("pointercancel", end);
 
     target.addEventListener(
       "wheel",
       function (e) {
-
         e.preventDefault();
-
-        if (!window.view3d) {
-
-          window.view3d = {
-
-            rotX: -25,
-            rotY: 35,
-            dist: 900,
-            autoRotate: false,
-            wireframe: false
-          };
-        }
-
-
-        var factor =
-          e.deltaY < 0
-            ? 0.9
-            : 1.1;
-
-
-        window.view3d.dist *=
-          factor;
-
-
-        window.view3d.dist =
-          Math.max(
-            30,
-            Math.min(
-              10000,
-              window.view3d.dist
-            )
-          );
-
-
-        fitCamera(
-          masterData ||
-          getMasterData()
-        );
-
-        render();
+        zoomBy(e.deltaY < 0 ? 0.9 : 1.1);
       },
-      {
-        passive: false
-      }
+      { passive: false }
     );
   }
 
@@ -1749,77 +1294,42 @@
      PUBLIC CONTROLS
      ========================================================= */
 
-  function setWireframe(
-    value
-  ) {
+  function setWireframe(value) {
 
-    if (!window.view3d) {
-      return;
-    }
-
-    window.view3d.wireframe =
-      !!value;
+    view().wireframe = !!value;
 
     applyWireframe();
-
+    syncButtons();
     render();
   }
 
+  function setAutoRotate(value) {
 
-  function setAutoRotate(
-    value
-  ) {
+    view().autoRotate = !!value;
 
-    if (!window.view3d) {
-      return;
-    }
+    syncButtons();
 
-    window.view3d.autoRotate =
-      !!value;
+    if (view().autoRotate) { startAnimation(); }
   }
 
+  function setLabels(value) {
+
+    view().labels = !!value;
+
+    syncButtons();
+
+    draw();
+  }
 
   function resetView() {
 
-    if (!masterGroup) {
-      return;
-    }
+    view().zoom = 1;
 
-    masterGroup.rotation.set(
-      0,
-      0,
-      0
-    );
+    viewSet = false;
 
-    if (window.view3d) {
-
-      window.view3d.rotX =
-        -25;
-
-      window.view3d.rotY =
-        35;
-    }
-
-
-    fitCamera(
-      masterData ||
-      getMasterData()
-    );
-
+    setDefaultView();
+    fitCamera();
     render();
-  }
-
-
-  /* =========================================================
-     START ANIMATION
-     ========================================================= */
-
-  function startAnimation() {
-
-    if (!animationId) {
-
-      animate();
-    }
   }
 
 
@@ -1828,41 +1338,19 @@
      ========================================================= */
 
   window.ThreeD = {
-
-    init:
-      init,
-
-    draw:
-      draw,
-
-    resize:
-      resize,
-
-    render:
-      render,
-
-    reset:
-      resetView,
-
-    resetView:
-      resetView,
-
-    setWireframe:
-      setWireframe,
-
-    setAutoRotate:
-      setAutoRotate,
-
-    getMasterData:
-      getMasterData,
-
-    startAnimation:
-      startAnimation
+    init: init,
+    draw: draw,
+    resize: resize,
+    render: render,
+    reset: resetView,
+    resetView: resetView,
+    setWireframe: setWireframe,
+    setAutoRotate: setAutoRotate,
+    setLabels: setLabels,
+    getMasterData: getMasterData,
+    startAnimation: startAnimation
   };
 
-
-  console.log(
-    "ThreeD V7 loaded — Master Geometry viewer"
-  );
+  console.log("ThreeD V8 loaded — folded sheet viewer");
 
 })();
