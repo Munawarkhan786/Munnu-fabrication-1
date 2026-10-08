@@ -1,38 +1,12 @@
 /* =========================================================
    FLAT.JS — 2D MASTER FLAT VIEW V9
    ---------------------------------------------------------
-   GeometryEngine ab CLOUDFLARE WORKER pe hai (server pe).
-   Flat.js = SIRF DIKHANA (display only)
-
-   Is file me koi bend / angle / cup-cut ka hisaab nahi hai.
-   Jo bhi number dikhta hai, wo Worker se fetch hota hai.
-
-   Kya dikhata hai:
-     - sheet, grid, blue bend/marking lines (↑ / ↓ + angle)
-     - har line ka marking size (upar aur left me)
-     - sheet ka total size
-     - RED cup cut:
-         * seedha chaukor cut  -> sirf laal rang (koi likha nahi)
-         * tirchi (degree) cut -> laal rang + naap likha hua
-
-   Unit option (upar):  inch  |  mm
-   Zoom / pan / pinch / reset, cut pe click = hide/show.
+   Data ab window.currentGeometryData se aata hai
+   (main.js Worker se EK BAAR fetch karta hai).
    ========================================================= */
 
 (function () {
-
   "use strict";
-
-  /* =========================================================
-     WORKER SETUP — geometry ab server pe hai
-     ========================================================= */
-
-  var WORKER_URL = 'https://munnu-fabrication-worker.munawarkhan487.workers.dev';
-  var API_KEY = 'munnu-secret-2026-xyz-987';
-
-  /* =========================================================
-     HELPERS
-     ========================================================= */
 
   function $(id) {
     return document.getElementById(id);
@@ -51,36 +25,9 @@
     return window.AppState || window.state || {};
   }
 
-  /* ---------- Worker se data fetch karo ---------- */
-  async function getMasterData() {
-    try {
-      var state = getState();
-
-      var response = await fetch(WORKER_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': API_KEY
-        },
-        body: JSON.stringify({
-          settings: state.settings || window.settings || {},
-          lenLines: state.lenLines || [],
-          depLines: state.depLines || []
-        })
-      });
-
-      if (!response.ok) {
-        console.error('Worker error:', response.status);
-        return null;
-      }
-
-      return await response.json();
-    } catch (err) {
-      console.error('Fetch error:', err);
-      return null;
-    }
+  function getMasterData() {
+    return window.currentGeometryData || null;
   }
-
 
   /* =========================================================
      UNITS
@@ -130,7 +77,6 @@
     return (Math.round(num(deg) * 10) / 10).toString() + "°";
   }
 
-
   /* =========================================================
      STATE
      ========================================================= */
@@ -142,8 +88,6 @@
   var pointers = {};
   var lastPinch = 0;
   var currentData = null;
-  var boundButtons = false;
-
 
   /* =========================================================
      CANVAS
@@ -181,7 +125,6 @@
       height: canvas._logicalHeight || canvas.clientHeight || 500
     };
   }
-
 
   /* =========================================================
      VIEW TRANSFORM
@@ -230,7 +173,6 @@
     return { x: (px - o.x) / o.base, y: (py - o.y) / o.base };
   }
 
-
   /* =========================================================
      BACKGROUND / SHEET / GRID
      ========================================================= */
@@ -277,9 +219,8 @@
     ctx.restore();
   }
 
-
   /* =========================================================
-     BEND / MARKING LINES
+     BEND LINES
      ========================================================= */
 
   function drawBendLine(x1, y1, x2, y2, line, data) {
@@ -331,7 +272,6 @@
     });
     ctx.restore();
   }
-
 
   /* =========================================================
      CUTS
@@ -484,7 +424,6 @@
     });
   }
 
-
   /* =========================================================
      SIZE LABELS
      ========================================================= */
@@ -574,7 +513,6 @@
     ctx.restore();
   }
 
-
   /* =========================================================
      LEGEND / EMPTY
      ========================================================= */
@@ -620,7 +558,6 @@
     ctx.fillText(message, c.width / 2, c.height / 2);
     ctx.restore();
   }
-
 
   /* =========================================================
      CUT SIZE LIST
@@ -697,7 +634,6 @@
     }
   }
 
-
   /* =========================================================
      MAIN DRAW
      ========================================================= */
@@ -709,21 +645,19 @@
     el.textContent = (Math.round(rel * 10) / 10).toFixed(1) + "x";
   }
 
-  /* ⚠️ draw() ab async hai — Worker se fetch karta hai */
-  async function draw() {
+  function draw() {
     if (!getCanvas()) { return; }
 
     ensureUnitButtons();
     bindButtons();
     setupCanvasSize();
 
-    /* Worker se data fetch karo */
-    currentData = await getMasterData();
+    currentData = getMasterData();
 
     drawBackground();
 
     if (!currentData) {
-      drawEmpty("Worker se data nahi aaya — internet check karo");
+      drawEmpty("Data loading...");
       clearCutList();
       return;
     }
@@ -777,7 +711,6 @@
   function zoomIn() { view.zoom = clamp(view.zoom * 1.2, 0.05, 40); draw(); }
   function zoomOut() { view.zoom = clamp(view.zoom / 1.2, 0.05, 40); draw(); }
 
-
   /* =========================================================
      UNIT SWITCH
      ========================================================= */
@@ -823,7 +756,6 @@
     syncUnitButtons();
   }
 
-
   /* =========================================================
      BUTTONS
      ========================================================= */
@@ -848,7 +780,6 @@
     bindOnce("flat-unit-inch", function () { setUnit("inch"); });
     bindOnce("flat-unit-mm", function () { setUnit("mm"); });
   }
-
 
   /* =========================================================
      CANVAS EVENTS
@@ -938,24 +869,22 @@
     });
   }
 
-
   /* =========================================================
      INIT
      ========================================================= */
 
-  async function init() {
+  function init() {
     if (!getCanvas()) { return; }
     window.flatUnit = unit;
     ensureUnitButtons();
     bindButtons();
-    currentData = await getMasterData();
+    currentData = getMasterData();
     if (currentData) {
       view.zoom = fitScale(currentData);
       view._fitted = true;
     }
     draw();
   }
-
 
   /* =========================================================
      PUBLIC API
