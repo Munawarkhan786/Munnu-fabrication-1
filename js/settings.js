@@ -1,23 +1,12 @@
 /* =========================================================
    SETTINGS.JS — Material / Thickness / Bend Settings
    ---------------------------------------------------------
-   RESPONSIBILITY:
-   - Material
-   - Thickness
-   - V-Die
-   - Radius
-   - K-Factor
-   - Springback
-   - Corner Relief
-   - Save / Load
+   Data ab window.currentGeometryData se aata hai
+   (main.js Worker se EK BAAR fetch karta hai).
    ========================================================= */
 
 (function () {
   "use strict";
-
-  /* =======================================================
-     HELPERS
-     ======================================================= */
 
   function $(id) {
     return document.getElementById(id);
@@ -44,11 +33,7 @@
 
     el.textContent = message || "";
 
-    el.classList.remove(
-      "saved",
-      "saving",
-      "failed"
-    );
+    el.classList.remove("saved", "saving", "failed");
 
     if (type) {
       el.classList.add(type);
@@ -86,29 +71,12 @@
      HTML INPUTS
      ======================================================= */
 
-  function getVDieInput() {
-    return $("setVdie");
-  }
-
-  function getRadiusInput() {
-    return $("setRadius");
-  }
-
-  function getKFactorInput() {
-    return $("setKfactor");
-  }
-
-  function getSpringbackInput() {
-    return $("setSpringback");
-  }
-
-  function getReliefInput() {
-    return $("setRelief");
-  }
-
-  function getCustomThicknessInput() {
-    return $("customThick");
-  }
+  function getVDieInput() { return $("setVdie"); }
+  function getRadiusInput() { return $("setRadius"); }
+  function getKFactorInput() { return $("setKfactor"); }
+  function getSpringbackInput() { return $("setSpringback"); }
+  function getReliefInput() { return $("setRelief"); }
+  function getCustomThicknessInput() { return $("customThick"); }
 
   /* =======================================================
      SANITIZE
@@ -117,10 +85,7 @@
   function sanitize(settings) {
     var s = settings || {};
 
-    var material =
-      s.material === "SS202"
-        ? "SS202"
-        : "SS304";
+    var material = s.material === "SS202" ? "SS202" : "SS304";
 
     var thickness = parseFloat(s.thickness);
     var vDie = parseFloat(s.vDie);
@@ -132,25 +97,18 @@
     if (!isFinite(thickness) || thickness <= 0) {
       thickness = DEFAULTS.thickness;
     }
-
     if (!isFinite(vDie) || vDie <= 0) {
       vDie = DEFAULTS.vDie;
     }
-
     if (!isFinite(radius) || radius <= 0) {
       radius = DEFAULTS.radius;
     }
-
     if (!isFinite(kfactor) || kfactor <= 0) {
-      kfactor =
-        MATERIAL_K[material] ||
-        DEFAULTS.kfactor;
+      kfactor = MATERIAL_K[material] || DEFAULTS.kfactor;
     }
-
     if (!isFinite(springback) || springback < 0) {
       springback = DEFAULTS.springback;
     }
-
     if (!isFinite(relief) || relief < 0) {
       relief = DEFAULTS.relief;
     }
@@ -175,21 +133,16 @@
 
     var material = state.material || DEFAULTS.material;
 
-    var activeMaterial =
-      document.querySelector(".material-btn.active");
+    var activeMaterial = document.querySelector(".material-btn.active");
 
     if (activeMaterial) {
-      material =
-        activeMaterial.dataset.material ||
+      material = activeMaterial.dataset.material ||
         activeMaterial.dataset.value ||
         activeMaterial.value ||
         material;
     }
 
-    material =
-      String(material)
-        .toUpperCase()
-        .replace(/\s+/g, "");
+    material = String(material).toUpperCase().replace(/\s+/g, "");
 
     if (material.indexOf("202") !== -1) {
       material = "SS202";
@@ -199,12 +152,10 @@
 
     var thickness = parseFloat(state.thickness);
 
-    var activeThickness =
-      document.querySelector(".thickness-btn.active");
+    var activeThickness = document.querySelector(".thickness-btn.active");
 
     if (activeThickness) {
-      var buttonThickness =
-        activeThickness.dataset.thick ||
+      var buttonThickness = activeThickness.dataset.thick ||
         activeThickness.dataset.thickness ||
         activeThickness.dataset.value ||
         activeThickness.value;
@@ -216,61 +167,27 @@
       }
     }
 
-    var customThickness =
-      getCustomThicknessInput();
+    var customThickness = getCustomThicknessInput();
 
-    /*
-      Custom thickness takes priority
-      only when user has entered a value.
-    */
-    if (
-      customThickness &&
-      String(customThickness.value).trim() !== ""
-    ) {
+    if (customThickness && String(customThickness.value).trim() !== "") {
       var ct = parseFloat(customThickness.value);
 
-      if (
-        isFinite(ct) &&
-        ct >= 0.1 &&
-        ct <= 10
-      ) {
+      if (isFinite(ct) && ct >= 0.1 && ct <= 10) {
         thickness = ct;
       }
     }
 
     return sanitize({
       material: material,
-
-      thickness:
-        isFinite(thickness)
-          ? thickness
-          : DEFAULTS.thickness,
-
-      vDie: numberFromElement(
-        getVDieInput(),
-        DEFAULTS.vDie
-      ),
-
-      radius: numberFromElement(
-        getRadiusInput(),
-        DEFAULTS.radius
-      ),
-
+      thickness: isFinite(thickness) ? thickness : DEFAULTS.thickness,
+      vDie: numberFromElement(getVDieInput(), DEFAULTS.vDie),
+      radius: numberFromElement(getRadiusInput(), DEFAULTS.radius),
       kfactor: numberFromElement(
         getKFactorInput(),
-        MATERIAL_K[material] ||
-          DEFAULTS.kfactor
+        MATERIAL_K[material] || DEFAULTS.kfactor
       ),
-
-      springback: numberFromElement(
-        getSpringbackInput(),
-        DEFAULTS.springback
-      ),
-
-      relief: numberFromElement(
-        getReliefInput(),
-        DEFAULTS.relief
-      )
+      springback: numberFromElement(getSpringbackInput(), DEFAULTS.springback),
+      relief: numberFromElement(getReliefInput(), DEFAULTS.relief)
     });
   }
 
@@ -279,40 +196,19 @@
      ======================================================= */
 
   function fill(settings) {
-    var s = sanitize(
-      settings || getSettings()
-    );
+    var s = sanitize(settings || getSettings());
 
     var state = getState();
 
     state.settings = s;
 
-    /* Advanced inputs */
+    if (getVDieInput()) { getVDieInput().value = s.vDie; }
+    if (getRadiusInput()) { getRadiusInput().value = s.radius; }
+    if (getKFactorInput()) { getKFactorInput().value = s.kfactor; }
+    if (getSpringbackInput()) { getSpringbackInput().value = s.springback; }
+    if (getReliefInput()) { getReliefInput().value = s.relief; }
 
-    if (getVDieInput()) {
-      getVDieInput().value = s.vDie;
-    }
-
-    if (getRadiusInput()) {
-      getRadiusInput().value = s.radius;
-    }
-
-    if (getKFactorInput()) {
-      getKFactorInput().value = s.kfactor;
-    }
-
-    if (getSpringbackInput()) {
-      getSpringbackInput().value = s.springback;
-    }
-
-    if (getReliefInput()) {
-      getReliefInput().value = s.relief;
-    }
-
-    /* Custom thickness */
-
-    var customThickness =
-      getCustomThicknessInput();
+    var customThickness = getCustomThicknessInput();
 
     if (customThickness) {
       customThickness.value = "";
@@ -326,57 +222,34 @@
      ======================================================= */
 
   function updateButtons(settings) {
-
-    var materialButtons =
-      document.querySelectorAll(
-        ".material-btn"
-      );
+    var materialButtons = document.querySelectorAll(".material-btn");
 
     materialButtons.forEach(function (button) {
-
-      var value =
-        button.dataset.material ||
+      var value = button.dataset.material ||
         button.dataset.value ||
         button.value ||
         button.textContent;
 
-      var normalized =
-        String(value || "")
-          .toUpperCase()
-          .replace(/\s+/g, "");
+      var normalized = String(value || "").toUpperCase().replace(/\s+/g, "");
 
-      var material =
-        normalized.indexOf("202") !== -1
-          ? "SS202"
-          : "SS304";
+      var material = normalized.indexOf("202") !== -1 ? "SS202" : "SS304";
 
-      button.classList.toggle(
-        "active",
-        material === settings.material
-      );
+      button.classList.toggle("active", material === settings.material);
     });
 
-    var thicknessButtons =
-      document.querySelectorAll(
-        ".thickness-btn"
-      );
+    var thicknessButtons = document.querySelectorAll(".thickness-btn");
 
     thicknessButtons.forEach(function (button) {
-
-      var value =
-        button.dataset.thick ||
+      var value = button.dataset.thick ||
         button.dataset.thickness ||
         button.dataset.value ||
         button.value;
 
-      var num = parseFloat(value);
+      var numVal = parseFloat(value);
 
       button.classList.toggle(
         "active",
-        isFinite(num) &&
-        Math.abs(
-          num - settings.thickness
-        ) < 0.0001
+        isFinite(numVal) && Math.abs(numVal - settings.thickness) < 0.0001
       );
     });
   }
@@ -386,36 +259,19 @@
      ======================================================= */
 
   function selectMaterial(material) {
+    var text = String(material || "").toUpperCase().replace(/\s+/g, "");
 
-    var text =
-      String(material || "")
-        .toUpperCase()
-        .replace(/\s+/g, "");
-
-    var selected =
-      text.indexOf("202") !== -1
-        ? "SS202"
-        : "SS304";
+    var selected = text.indexOf("202") !== -1 ? "SS202" : "SS304";
 
     var settings = getSettings();
 
     settings.material = selected;
-
-    /*
-      Material change automatically changes
-      default K-factor.
-    */
-    settings.kfactor =
-      MATERIAL_K[selected];
+    settings.kfactor = MATERIAL_K[selected];
 
     fill(settings);
-
     save();
 
-    setStatus(
-      selected + " Saved",
-      "saved"
-    );
+    setStatus(selected + " Saved", "saved");
   }
 
   /* =======================================================
@@ -423,14 +279,9 @@
      ======================================================= */
 
   function selectThickness(value) {
+    var thickness = parseFloat(value);
 
-    var thickness =
-      parseFloat(value);
-
-    if (
-      !isFinite(thickness) ||
-      thickness <= 0
-    ) {
+    if (!isFinite(thickness) || thickness <= 0) {
       return;
     }
 
@@ -438,21 +289,16 @@
 
     settings.thickness = thickness;
 
-    var custom =
-      getCustomThicknessInput();
+    var custom = getCustomThicknessInput();
 
     if (custom) {
       custom.value = "";
     }
 
     fill(settings);
-
     save();
 
-    setStatus(
-      "Thickness Saved",
-      "saved"
-    );
+    setStatus("Thickness Saved", "saved");
   }
 
   /* =======================================================
@@ -460,20 +306,13 @@
      ======================================================= */
 
   function saveCustomThickness() {
-
-    var input =
-      getCustomThicknessInput();
+    var input = getCustomThicknessInput();
 
     if (!input) return;
 
-    var value =
-      parseFloat(input.value);
+    var value = parseFloat(input.value);
 
-    if (
-      !isFinite(value) ||
-      value < 0.1 ||
-      value > 10
-    ) {
+    if (!isFinite(value) || value < 0.1 || value > 10) {
       return;
     }
 
@@ -481,29 +320,17 @@
 
     settings.thickness = value;
 
-    /*
-      Remove active state from
-      preset thickness buttons.
-    */
-    document
-      .querySelectorAll(".thickness-btn")
-      .forEach(function (button) {
-        button.classList.remove("active");
-      });
+    document.querySelectorAll(".thickness-btn").forEach(function (button) {
+      button.classList.remove("active");
+    });
 
     fill(settings);
 
-    /*
-      Put custom value back after fill.
-    */
     input.value = value;
 
     save();
 
-    setStatus(
-      "Custom Thickness Saved",
-      "saved"
-    );
+    setStatus("Custom Thickness Saved", "saved");
   }
 
   /* =======================================================
@@ -511,25 +338,16 @@
      ======================================================= */
 
   function initMaterialButtons() {
+    document.querySelectorAll(".material-btn").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var value = button.dataset.material ||
+          button.dataset.value ||
+          button.value ||
+          button.textContent;
 
-    document
-      .querySelectorAll(".material-btn")
-      .forEach(function (button) {
-
-        button.addEventListener(
-          "click",
-          function () {
-
-            var value =
-              button.dataset.material ||
-              button.dataset.value ||
-              button.value ||
-              button.textContent;
-
-            selectMaterial(value);
-          }
-        );
+        selectMaterial(value);
       });
+    });
   }
 
   /* =======================================================
@@ -537,25 +355,16 @@
      ======================================================= */
 
   function initThicknessButtons() {
+    document.querySelectorAll(".thickness-btn").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var value = button.dataset.thick ||
+          button.dataset.thickness ||
+          button.dataset.value ||
+          button.value;
 
-    document
-      .querySelectorAll(".thickness-btn")
-      .forEach(function (button) {
-
-        button.addEventListener(
-          "click",
-          function () {
-
-            var value =
-              button.dataset.thick ||
-              button.dataset.thickness ||
-              button.dataset.value ||
-              button.value;
-
-            selectThickness(value);
-          }
-        );
+        selectThickness(value);
       });
+    });
   }
 
   /* =======================================================
@@ -563,7 +372,6 @@
      ======================================================= */
 
   function initInputs() {
-
     var inputs = [
       getVDieInput(),
       getRadiusInput(),
@@ -573,34 +381,17 @@
     ];
 
     inputs.forEach(function (input) {
-
       if (!input) return;
 
-      input.addEventListener(
-        "change",
-        save
-      );
-
-      input.addEventListener(
-        "blur",
-        save
-      );
+      input.addEventListener("change", save);
+      input.addEventListener("blur", save);
     });
 
-    var customThickness =
-      getCustomThicknessInput();
+    var customThickness = getCustomThicknessInput();
 
     if (customThickness) {
-
-      customThickness.addEventListener(
-        "change",
-        saveCustomThickness
-      );
-
-      customThickness.addEventListener(
-        "blur",
-        saveCustomThickness
-      );
+      customThickness.addEventListener("change", saveCustomThickness);
+      customThickness.addEventListener("blur", saveCustomThickness);
     }
   }
 
@@ -609,85 +400,37 @@
      ======================================================= */
 
   function save() {
+    var settings = readUI();
 
-    var settings =
-      readUI();
+    var state = getState();
 
-    var state =
-      getState();
+    state.settings = settings;
 
-    state.settings =
-      settings;
-
-    setStatus(
-      "Saving...",
-      "saving"
-    );
+    setStatus("Saving...", "saving");
 
     try {
-
-      if (
-        window.Storage &&
-        typeof window.Storage.saveSettings ===
-          "function"
-      ) {
-
-        window.Storage.saveSettings(
-          settings
-        );
-
-      } else if (
-        window.Storage &&
-        typeof window.Storage.save ===
-          "function"
-      ) {
-
+      if (window.Storage && typeof window.Storage.saveSettings === "function") {
+        window.Storage.saveSettings(settings);
+      } else if (window.Storage && typeof window.Storage.save === "function") {
         window.Storage.save();
-
-      } else if (
-        window.Core &&
-        typeof window.Core.save ===
-          "function"
-      ) {
-
+      } else if (window.Core && typeof window.Core.save === "function") {
         window.Core.save();
-
       } else {
-
         localStorage.setItem(
           "sheetMarking_settings_v2",
           JSON.stringify(settings)
         );
       }
 
-      setStatus(
-        "Saved",
-        "saved"
-      );
-
+      setStatus("Saved", "saved");
     } catch (error) {
+      setStatus("Save failed", "failed");
 
-      setStatus(
-        "Save failed",
-        "failed"
-      );
-
-      if (
-        window.Bugs &&
-        typeof window.Bugs.error ===
-          "function"
-      ) {
-
-        window.Bugs.error(
-          "Settings save failed",
-          error
-        );
+      if (window.Bugs && typeof window.Bugs.error === "function") {
+        window.Bugs.error("Settings save failed", error);
       }
 
-      console.error(
-        "Settings save failed:",
-        error
-      );
+      console.error("Settings save failed:", error);
     }
 
     refreshViews();
@@ -695,73 +438,40 @@
 
   /* =======================================================
      REFRESH OTHER MODULES
+     ---------------------------------------------------------
+     Main.calculate() Worker se fetch karega, phir sab draw karega.
      ======================================================= */
 
   function refreshViews() {
+    // Main.calculate() Worker se fetch karega + sab views draw karega
+    if (window.Main && typeof window.Main.calculate === "function") {
+      window.Main.calculate();
+      return;
+    }
 
+    // Fallback (agar Main.calculate nahi hai)
     try {
-
-      if (
-        window.FlatView &&
-        typeof window.FlatView.draw ===
-          "function"
-      ) {
-
-        window.FlatView.draw();
-
-      } else if (
-        window.Flat &&
-        typeof window.Flat.draw ===
-          "function"
-      ) {
-
+      if (window.Flat && typeof window.Flat.draw === "function") {
         window.Flat.draw();
       }
-
     } catch (error) {
-
-      console.warn(
-        "Flat refresh failed:",
-        error
-      );
+      console.warn("Flat refresh failed:", error);
     }
 
     try {
-
-      if (
-        window.ThreeD &&
-        typeof window.ThreeD.draw ===
-          "function"
-      ) {
-
+      if (window.ThreeD && typeof window.ThreeD.draw === "function") {
         window.ThreeD.draw();
       }
-
     } catch (error) {
-
-      console.warn(
-        "3D refresh failed:",
-        error
-      );
+      console.warn("3D refresh failed:", error);
     }
 
     try {
-
-      if (
-        window.Result &&
-        typeof window.Result.render ===
-          "function"
-      ) {
-
+      if (window.Result && typeof window.Result.render === "function") {
         window.Result.render();
       }
-
     } catch (error) {
-
-      console.warn(
-        "Result refresh failed:",
-        error
-      );
+      console.warn("Result refresh failed:", error);
     }
   }
 
@@ -770,55 +480,32 @@
      ======================================================= */
 
   function loadSaved() {
-
-    var state =
-      getState();
+    var state = getState();
 
     if (
       state.settings &&
       typeof state.settings === "object" &&
       Object.keys(state.settings).length > 0
     ) {
-
-      state.settings =
-        sanitize(state.settings);
-
+      state.settings = sanitize(state.settings);
       fill(state.settings);
-
       return;
     }
 
     try {
-
-      var raw =
-        localStorage.getItem(
-          "sheetMarking_settings_v2"
-        );
+      var raw = localStorage.getItem("sheetMarking_settings_v2");
 
       if (raw) {
-
-        var saved =
-          JSON.parse(raw);
-
-        state.settings =
-          sanitize(saved);
-
+        var saved = JSON.parse(raw);
+        state.settings = sanitize(saved);
         fill(state.settings);
-
         return;
       }
-
     } catch (error) {
-
-      console.warn(
-        "Settings load failed:",
-        error
-      );
+      console.warn("Settings load failed:", error);
     }
 
-    state.settings =
-      sanitize(DEFAULTS);
-
+    state.settings = sanitize(DEFAULTS);
     fill(state.settings);
   }
 
@@ -827,17 +514,13 @@
      ======================================================= */
 
   function resetDefaults() {
+    var state = getState();
 
-    var state =
-      getState();
-
-    state.settings =
-      sanitize(DEFAULTS);
+    state.settings = sanitize(DEFAULTS);
 
     fill(state.settings);
 
-    var custom =
-      getCustomThicknessInput();
+    var custom = getCustomThicknessInput();
 
     if (custom) {
       custom.value = "";
@@ -845,10 +528,7 @@
 
     save();
 
-    setStatus(
-      "Default Restored",
-      "saved"
-    );
+    setStatus("Default Restored", "saved");
   }
 
   /* =======================================================
@@ -856,35 +536,19 @@
      ======================================================= */
 
   function initSaveResetButtons() {
-
-    var saveButton =
-      $("btn-save-settings");
+    var saveButton = $("btn-save-settings");
 
     if (saveButton) {
-
-      saveButton.addEventListener(
-        "click",
-        function () {
-
-          save();
-
-          setStatus(
-            "Settings Saved",
-            "saved"
-          );
-        }
-      );
+      saveButton.addEventListener("click", function () {
+        save();
+        setStatus("Settings Saved", "saved");
+      });
     }
 
-    var resetButton =
-      $("btn-reset-settings");
+    var resetButton = $("btn-reset-settings");
 
     if (resetButton) {
-
-      resetButton.addEventListener(
-        "click",
-        resetDefaults
-      );
+      resetButton.addEventListener("click", resetDefaults);
     }
   }
 
@@ -893,38 +557,18 @@
      ======================================================= */
 
   function init() {
-
     try {
-
       loadSaved();
-
       initMaterialButtons();
-
       initThicknessButtons();
-
       initInputs();
-
       initSaveResetButtons();
-
       fill(getSettings());
-
     } catch (error) {
+      console.error("Settings initialization failed:", error);
 
-      console.error(
-        "Settings initialization failed:",
-        error
-      );
-
-      if (
-        window.Bugs &&
-        typeof window.Bugs.error ===
-          "function"
-      ) {
-
-        window.Bugs.error(
-          "Settings initialization failed",
-          error
-        );
+      if (window.Bugs && typeof window.Bugs.error === "function") {
+        window.Bugs.error("Settings initialization failed", error);
       }
     }
   }
@@ -934,23 +578,14 @@
      ======================================================= */
 
   window.Settings = {
-
     init: init,
-
     fill: fill,
-
     save: save,
-
     load: loadSaved,
-
     reset: resetDefaults,
-
     get: function () {
-      return sanitize(
-        getSettings()
-      );
+      return sanitize(getSettings());
     }
-
   };
 
 })();
