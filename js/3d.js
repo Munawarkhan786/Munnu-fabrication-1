@@ -2,17 +2,12 @@
    3D.JS
    FOLDED SHEET VIEW V8
    ---------------------------------------------------------
-   GeometryEngine = BRAIN
+   GeometryEngine ab CLOUDFLARE WORKER pe hai (server pe).
    ThreeD         = SIRF DIKHANE WALA (visual)
 
    IMPORTANT:
    Ye file koi bend / angle / cup-cut calculation nahi karti.
-   Sab kuch GeometryEngine.analyze() ke `fold` data se aata hai:
-
-       data.fold.panels    : mudi hui sheet ke panels (3D points)
-       data.fold.corners   : corner cut / miter line ki jagah
-       data.fold.profiles  : length aur depth ka cross-section
-       data.fold.bounds    : poore piece ka size
+   Sab kuch Worker se fetch hota hai — `fold` data.
 
    Kya dikhata hai:
        - finished piece (finish side upar)
@@ -20,10 +15,6 @@
        - corner pe miter line (peeli) ya poora corner cut (laal)
        - length side aur depth side ka cross-section (neeche)
        - ghumana, pinch zoom, wireframe, auto rotate
-
-   Public API purana hi hai (init, draw, resize, render, reset,
-   resetView, setWireframe, setAutoRotate, getMasterData,
-   startAnimation) + setLabels.
    ========================================================= */
 
 (function () {
@@ -31,6 +22,13 @@
   "use strict";
 
   var UNIT = 10;   /* 1 inch = 10 three.js units */
+
+  /* =========================================================
+     WORKER SETUP — geometry ab server pe hai
+     ========================================================= */
+
+  var WORKER_URL = 'https://munnu-fabrication-worker.munawarkhan487.workers.dev';
+  var API_KEY = 'munnu-secret-2026-xyz-987';
 
 
   /* =========================================================
@@ -43,8 +41,8 @@
 
   var canvas3dEl = null;
 
-  var masterGroup = null;   /* ghumne wala */
-  var modelGroup = null;    /* andar, center pe rakha hua */
+  var masterGroup = null;
+  var modelGroup = null;
   var labelGroup = null;
 
   var animationId = null;
@@ -91,7 +89,6 @@
     return b ? gcd(b, a % b) : a;
   }
 
-  /* 1/16 inch tak fraction: 2.5 -> 2 1/2" */
   function fmtInch(v) {
 
     var x = Math.max(0, num(v));
@@ -135,31 +132,42 @@
 
 
   /* =========================================================
-     MASTER DATA
+     MASTER DATA — Worker se fetch karo
      ========================================================= */
 
-  function getMasterData() {
-
-    if (
-      !window.GeometryEngine ||
-      typeof window.GeometryEngine.analyze !== "function"
-    ) {
-      console.error("3D: GeometryEngine unavailable");
-      return null;
-    }
-
+  async function getMasterData() {
     try {
-      masterData = window.GeometryEngine.analyze(getState());
+      var state = getState();
+
+      var response = await fetch(WORKER_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': API_KEY
+        },
+        body: JSON.stringify({
+          settings: state.settings || window.settings || {},
+          lenLines: state.lenLines || [],
+          depLines: state.depLines || []
+        })
+      });
+
+      if (!response.ok) {
+        console.error('3D: Worker error', response.status);
+        return null;
+      }
+
+      masterData = await response.json();
       return masterData;
     } catch (err) {
-      console.error("3D: GeometryEngine failed", err);
+      console.error('3D: Fetch error', err);
       return null;
     }
   }
 
 
   /* =========================================================
-     MESSAGE OVERLAY (jab 3D nahi ban sakta)
+     MESSAGE OVERLAY
      ========================================================= */
 
   function ensureOverlay() {
@@ -204,7 +212,7 @@
      INIT
      ========================================================= */
 
-  function init() {
+  async function init() {
 
     if (initialized) { return; }
 
@@ -236,7 +244,7 @@
 
     initialized = true;
 
-    draw();
+    await draw();
   }
 
 
@@ -309,9 +317,7 @@
 
 
   /* =========================================================
-     EXTRA UI (info line + cross-sections + buttons)
-     ---------------------------------------------------------
-     index.html ko chhedna nahi padta, sab yahin se banta hai.
+     EXTRA UI
      ========================================================= */
 
   function createExtras() {
@@ -320,7 +326,6 @@
 
     if (!host) { return; }
 
-    /* legend badlo */
     var legend = host.querySelector(".legend");
 
     if (legend) {
@@ -328,14 +333,12 @@
         "⬜ Top (finish side) · 🔷 mudi hui flange · 🟡 miter line · 🔴 poora corner cut · 🟠 check karo";
     }
 
-    /* info line */
     infoEl = document.createElement("div");
     infoEl.style.cssText =
       "margin:8px 0 4px;color:#fbbf24;font:600 13px/1.4 Arial,sans-serif;";
 
     host.insertBefore(infoEl, canvas3dEl.nextSibling);
 
-    /* cross-sections */
     sectionsEl = document.createElement("div");
     sectionsEl.style.cssText = "margin:6px 0 10px;";
 
@@ -375,7 +378,6 @@
 
     host.insertBefore(sectionsEl, infoEl.nextSibling);
 
-    /* labels button */
     var rows = host.querySelectorAll(".view-controls");
     var lastRow = rows.length ? rows[rows.length - 1] : null;
 
@@ -548,9 +550,6 @@
 
   /* =========================================================
      FOLD -> THREE COORDINATES
-     ---------------------------------------------------------
-     fold (x, y, z)  ->  three (X = x, Y = z, Z = -y)
-     (ghumav sahi rehta hai, mirror nahi hota)
      ========================================================= */
 
   function toThree(p) {
@@ -613,7 +612,6 @@
 
       if (Math.hypot(n[0], n[1], n[2]) < 1e-9) { return; }
 
-      /* finish side jis taraf ho, wahi front face bane */
       var fn = panel.finishNormal || [0, 0, 1];
       var f3 = [fn[0], fn[2], -fn[1]];
 
@@ -648,7 +646,6 @@
       modelGroup.add(meshM);
       modelGroup.add(meshF);
 
-      /* kinare */
       var edges = new THREE.LineSegments(
         new THREE.EdgesGeometry(geo, 1),
         mat("edge", function () {
@@ -664,7 +661,7 @@
 
 
   /* =========================================================
-     CORNERS (miter line / poora cut / check)
+     CORNERS
      ========================================================= */
 
   function addCylinder(a, b, radius, color) {
@@ -879,24 +876,20 @@
 
 
   /* =========================================================
-     DRAW
+     DRAW — ab async hai (Worker se fetch)
      ========================================================= */
 
-  function draw() {
+  async function draw() {
 
     if (!initialized) {
-
-      init();
-
+      await init();
       if (!initialized) { return; }
-
-      /* init() khud draw() bula chuka hai */
       return;
     }
 
     resize();
 
-    var data = getMasterData();
+    var data = await getMasterData();
 
     clearModel();
 
@@ -1058,7 +1051,6 @@
       ctx.lineWidth = s.base ? 4 : 3;
       ctx.stroke();
 
-      /* bade segment pe label */
       var px = Math.hypot(
         (s.b[0] - s.a[0]) * sc,
         (s.b[1] - s.a[1]) * sc
@@ -1076,7 +1068,6 @@
       }
     });
 
-    /* "finish upar" ka tir */
     ctx.fillStyle = "#9aa5b1";
     ctx.font = "10px Arial";
     ctx.textAlign = "left";
@@ -1125,7 +1116,6 @@
 
     if (!masterGroup) { return; }
 
-    /* front se thoda side, upar se dekhta hua */
     masterGroup.rotation.set(0.5, Math.PI + 0.55, 0);
 
     viewSet = true;
@@ -1147,7 +1137,6 @@
     camera.near = Math.max(0.5, base * 0.02);
     camera.far = base * 20;
     camera.updateProjectionMatrix();
-
   }
 
   function zoomBy(factor) {
@@ -1193,7 +1182,7 @@
 
 
   /* =========================================================
-     CONTROLS (ghumana + pinch zoom)
+     CONTROLS
      ========================================================= */
 
   function bindControls() {
@@ -1351,6 +1340,6 @@
     startAnimation: startAnimation
   };
 
-  console.log("ThreeD V8 loaded — folded sheet viewer");
+  console.log("ThreeD V8 loaded — folded sheet viewer (Worker mode)");
 
 })();
