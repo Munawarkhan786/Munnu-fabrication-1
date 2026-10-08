@@ -1,557 +1,300 @@
 /* =========================================================
-   MAIN — APP STARTER
+   MAIN.JS — APP STARTER
    =========================================================
+   Geometry ab CLOUDFLARE WORKER pe hai (server pe).
 
-   MODULE ORDER:
-
-   1. Bugs
-   2. Security
-   3. Sheet
-   4. Settings
-   5. Flat
-   6. ThreeD
-   7. Result
-   8. UI
-
-   IMPORTANT:
-   - Core / Geometry pehle index.html se load hote hain.
-   - Main sirf modules ko initialize karta hai.
-   - Engineering calculation MAIN mein nahi hoti.
-   - GeometryEngine MASTER calculation engine hai.
+   main.js:
+   - Worker se EK BAAR fetch karta hai
+   - window.currentGeometryData me store karta hai
+   - flat.js / 3d.js / result.js usko use karte hain
    ========================================================= */
 
 (function () {
   "use strict";
 
-  // =========================================================
-  // MODULE LIST
-  // =========================================================
+  /* =========================================================
+     WORKER SETUP
+     ========================================================= */
+
+  var WORKER_URL = 'https://munnu-fabrication-worker.munawarkhan487.workers.dev';
+  var API_KEY = 'munnu-secret-2026-xyz-987';
+
+
+  /* =========================================================
+     GLOBAL DATA STORE
+     ========================================================= */
+
+  window.currentGeometryData = null;
+
+
+  /* =========================================================
+     FETCH GEOMETRY FROM WORKER (EK BAAR)
+     ========================================================= */
+
+  async function fetchGeometryData() {
+    var state = window.AppState || window.state || {};
+
+    try {
+      console.log("🔄 Worker se data fetch...");
+
+      var response = await fetch(WORKER_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': API_KEY
+        },
+        body: JSON.stringify({
+          settings: state.settings || window.settings || {},
+          lenLines: state.lenLines || [],
+          depLines: state.depLines || []
+        })
+      });
+
+      if (!response.ok) {
+        console.error('❌ Worker error:', response.status);
+        window.currentGeometryData = null;
+        return null;
+      }
+
+      var data = await response.json();
+      window.currentGeometryData = data;
+
+      console.log("✅ Geometry data ready");
+      return data;
+
+    } catch (err) {
+      console.error('❌ Fetch error:', err);
+      window.currentGeometryData = null;
+      return null;
+    }
+  }
+
+
+  /* =========================================================
+     MODULE LIST
+     ========================================================= */
 
   var MODULES = [
-    {
-      name: "Bugs",
-      label: "🐛 Bugs",
-      priority: 1
-    },
-    {
-      name: "Security",
-      label: "🔒 Security",
-      priority: 2
-    },
-    {
-      name: "Sheet",
-      label: "📝 Sheet",
-      priority: 3
-    },
-    {
-      name: "Settings",
-      label: "⚙️ Settings",
-      priority: 4
-    },
-    {
-      name: "Flat",
-      label: "📐 Flat",
-      priority: 5
-    },
-    {
-      name: "ThreeD",
-      label: "📦 3D",
-      priority: 6
-    },
-    {
-      name: "Result",
-      label: "✂️ Result",
-      priority: 7
-    },
-    {
-      name: "UI",
-      label: "🎨 UI",
-      priority: 8
-    }
+    { name: "Bugs",     label: "🐛 Bugs",     priority: 1 },
+    { name: "Security", label: "🔒 Security", priority: 2 },
+    { name: "Sheet",    label: "📝 Sheet",    priority: 3 },
+    { name: "Settings", label: "⚙️ Settings", priority: 4 },
+    { name: "Flat",     label: "📐 Flat",     priority: 5 },
+    { name: "ThreeD",   label: "📦 3D",       priority: 6 },
+    { name: "Result",   label: "✂️ Result",   priority: 7 },
+    { name: "UI",       label: "🎨 UI",       priority: 8 }
   ];
 
-  // =========================================================
-  // SORT MODULES
-  // =========================================================
 
   function sortModules() {
-
     MODULES.sort(function (a, b) {
-
-      return (
-        (a.priority || 999) -
-        (b.priority || 999)
-      );
+      return (a.priority || 999) - (b.priority || 999);
     });
   }
 
-  // =========================================================
-  // CHECK CORE
-  // =========================================================
+
+  /* =========================================================
+     CHECK CORE
+     ========================================================= */
 
   function checkCore() {
-
     var ok = true;
 
-    // -------------------------------------------------------
-    // GeometryEngine
-    // -------------------------------------------------------
-
-    if (
-      !window.GeometryEngine ||
-      typeof window.GeometryEngine.analyze !== "function"
-    ) {
-
-      console.error(
-        "❌ GeometryEngine missing or invalid."
-      );
-
-      ok = false;
-    }
-
-    // -------------------------------------------------------
-    // Storage
-    // -------------------------------------------------------
-
     if (!window.Storage) {
-
-      console.warn(
-        "⚠️ Storage module not available."
-      );
+      console.warn("⚠️ Storage module not available.");
     }
 
-    // -------------------------------------------------------
-    // AppState / state
-    // -------------------------------------------------------
-
-    if (
-      !window.AppState &&
-      !window.state
-    ) {
-
-      console.warn(
-        "⚠️ App state not found."
-      );
+    if (!window.AppState && !window.state) {
+      console.warn("⚠️ App state not found.");
     }
 
     return ok;
   }
 
-  // =========================================================
-  // LOAD PERSISTED DATA
-  // =========================================================
+
+  /* =========================================================
+     LOAD PERSISTED DATA
+     ========================================================= */
 
   function loadPersistedData() {
-
     if (!window.Storage) {
-
-      console.warn(
-        "⚠️ Storage unavailable — starting fresh."
-      );
-
+      console.warn("⚠️ Storage unavailable.");
       return;
     }
 
-    // -------------------------------------------------------
-    // SETTINGS
-    // -------------------------------------------------------
-
     try {
-
-      if (
-        typeof window.Storage.loadSettings ===
-        "function"
-      ) {
-
+      if (typeof window.Storage.loadSettings === "function") {
         window.Storage.loadSettings();
-
-        console.log(
-          "✅ Settings loaded"
-        );
+        console.log("✅ Settings loaded");
       }
-
     } catch (err) {
-
-      console.error(
-        "❌ Settings load error:",
-        err
-      );
-
-      if (window.Bugs) {
-
-        window.Bugs.log(
-          "main.loadSettings",
-          err.message,
-          err.stack
-        );
-      }
+      console.error("❌ Settings load error:", err);
     }
 
-    // -------------------------------------------------------
-    // APP DATA
-    // -------------------------------------------------------
-
     try {
-
-      if (
-        typeof window.Storage.load ===
-        "function"
-      ) {
-
+      if (typeof window.Storage.load === "function") {
         window.Storage.load();
-
-        console.log(
-          "✅ App data loaded"
-        );
+        console.log("✅ App data loaded");
       }
-
     } catch (err) {
-
-      console.error(
-        "❌ App data load error:",
-        err
-      );
-
-      if (window.Bugs) {
-
-        window.Bugs.log(
-          "main.load",
-          err.message,
-          err.stack
-        );
-      }
+      console.error("❌ App data load error:", err);
     }
   }
 
-  // =========================================================
-  // INIT ONE MODULE
-  // =========================================================
+
+  /* =========================================================
+     INIT ONE MODULE
+     ========================================================= */
 
   function initModule(mod) {
-
-    var module =
-      window[mod.name];
-
-    // -------------------------------------------------------
-    // MODULE MISSING
-    // -------------------------------------------------------
+    var module = window[mod.name];
 
     if (!module) {
-
-      console.warn(
-        "⚠️ Module missing: " +
-        mod.name
-      );
-
+      console.warn("⚠️ Module missing: " + mod.name);
       return false;
     }
 
-    // -------------------------------------------------------
-    // INIT MISSING
-    // -------------------------------------------------------
-
-    if (
-      typeof module.init !==
-      "function"
-    ) {
-
-      console.warn(
-        "⚠️ No init() in: " +
-        mod.name
-      );
-
+    if (typeof module.init !== "function") {
+      console.warn("⚠️ No init() in: " + mod.name);
       return false;
     }
-
-    // -------------------------------------------------------
-    // INIT
-    // -------------------------------------------------------
 
     try {
+      var result = module.init();
 
-      module.init();
+      if (result && typeof result.then === "function") {
+        result.catch(function (err) {
+          console.error("❌ " + mod.name + ".init async error:", err);
+        });
+      }
 
-      console.log(
-        "✅ " +
-        mod.label +
-        " initialized"
-      );
-
+      console.log("✅ " + mod.label + " initialized");
       return true;
 
     } catch (err) {
-
-      console.error(
-        "❌ " +
-        mod.name +
-        ".init error:",
-        err
-      );
-
-      if (window.Bugs) {
-
-        try {
-
-          window.Bugs.log(
-            mod.name + ".init",
-            err.message,
-            err.stack
-          );
-
-        } catch (bugErr) {
-
-          console.error(
-            "Bug logger error:",
-            bugErr
-          );
-        }
-      }
-
+      console.error("❌ " + mod.name + ".init error:", err);
       return false;
     }
   }
 
-  // =========================================================
-  // INIT ALL MODULES
-  // =========================================================
+
+  /* =========================================================
+     INIT ALL MODULES
+     ========================================================= */
 
   function initModules() {
-
     sortModules();
 
     var success = 0;
     var failed = 0;
 
-    MODULES.forEach(
-      function (mod) {
+    MODULES.forEach(function (mod) {
+      var result = initModule(mod);
+      if (result) { success++; } else { failed++; }
+    });
 
-        var result =
-          initModule(mod);
-
-        if (result) {
-
-          success++;
-
-        } else {
-
-          failed++;
-        }
-      }
-    );
-
-    // -------------------------------------------------------
-    // FINAL STATUS
-    // -------------------------------------------------------
-
-    console.log(
-      "🎉 App ready! " +
-      success +
-      " ok, " +
-      failed +
-      " failed"
-    );
-
-    // -------------------------------------------------------
-    // APP READY EVENT
-    // -------------------------------------------------------
+    console.log("🎉 App ready! " + success + " ok, " + failed + " failed");
 
     try {
-
-      window.dispatchEvent(
-        new CustomEvent(
-          "appReady",
-          {
-            detail: {
-              success: success,
-              failed: failed
-            }
-          }
-        )
-      );
-
+      window.dispatchEvent(new CustomEvent("appReady", {
+        detail: { success: success, failed: failed }
+      }));
     } catch (err) {
-
-      console.warn(
-        "⚠️ appReady event failed:",
-        err
-      );
+      console.warn("⚠️ appReady event failed:", err);
     }
   }
 
-  // =========================================================
-  // FINAL DRAW
-  // =========================================================
 
-  function initialDraw() {
+  /* =========================================================
+     DRAW ALL VIEWS
+     ========================================================= */
 
-    // -------------------------------------------------------
-    // Flat
-    // -------------------------------------------------------
-
+  function drawAll() {
     try {
-
-      if (
-        window.Flat &&
-        typeof window.Flat.draw ===
-        "function"
-      ) {
-
+      if (window.Flat && typeof window.Flat.draw === "function") {
         window.Flat.draw();
       }
-
     } catch (err) {
-
-      console.error(
-        "❌ Initial Flat draw error:",
-        err
-      );
-
-      if (window.Bugs) {
-
-        window.Bugs.log(
-          "main.flatDraw",
-          err.message,
-          err.stack
-        );
-      }
+      console.error("❌ Flat draw error:", err);
     }
 
-    // -------------------------------------------------------
-    // 3D
-    // -------------------------------------------------------
-
     try {
-
-      if (
-        window.ThreeD &&
-        typeof window.ThreeD.draw ===
-        "function"
-      ) {
-
-        // 3D tab hidden ho sakta hai,
-        // isliye draw fail ho toh app crash nahi karega.
+      if (window.ThreeD && typeof window.ThreeD.draw === "function") {
         window.ThreeD.draw();
       }
-
     } catch (err) {
-
-      console.error(
-        "❌ Initial 3D draw error:",
-        err
-      );
-
-      if (window.Bugs) {
-
-        window.Bugs.log(
-          "main.threeDDraw",
-          err.message,
-          err.stack
-        );
-      }
+      console.error("❌ 3D draw error:", err);
     }
-
-    // -------------------------------------------------------
-    // Result
-    // -------------------------------------------------------
 
     try {
-
-      if (
-        window.Result &&
-        typeof window.Result.render ===
-        "function"
-      ) {
-
+      if (window.Result && typeof window.Result.render === "function") {
         window.Result.render();
       }
-
     } catch (err) {
-
-      console.error(
-        "❌ Initial Result render error:",
-        err
-      );
-
-      if (window.Bugs) {
-
-        window.Bugs.log(
-          "main.resultRender",
-          err.message,
-          err.stack
-        );
-      }
+      console.error("❌ Result render error:", err);
     }
   }
 
-  // =========================================================
-  // BOOT
-  // =========================================================
 
-  function boot() {
+  /* =========================================================
+     CALCULATE — 1 fetch + sab draw
+     ========================================================= */
 
-    console.log(
-      "🚀 Sheet Marking Tool starting..."
-    );
+  async function calculate() {
+    console.log("⚙️ Calculate...");
 
-    // -------------------------------------------------------
-    // CORE CHECK
-    // -------------------------------------------------------
+    var data = await fetchGeometryData();
 
-    var coreOK =
-      checkCore();
-
-    if (!coreOK) {
-
-      console.error(
-        "❌ Core/Geometry problem. " +
-        "App will continue for debugging."
-      );
+    if (!data) {
+      console.warn("⚠️ Data nahi aaya");
+      return null;
     }
 
-    // -------------------------------------------------------
-    // LOAD SAVED DATA
-    // -------------------------------------------------------
+    drawAll();
 
+    console.log("✅ Sab views update");
+    return data;
+  }
+
+
+  /* =========================================================
+     BOOT
+     ========================================================= */
+
+  async function boot() {
+    console.log("🚀 Sheet Marking Tool starting...");
+
+    checkCore();
     loadPersistedData();
 
-    // -------------------------------------------------------
-    // WAIT FOR DOM
-    // -------------------------------------------------------
+    await fetchGeometryData();
 
-    setTimeout(
-      function () {
-
-        initModules();
-
-        // Small delay so modules can finish
-        // their DOM setup first.
-        setTimeout(
-          initialDraw,
-          50
-        );
-
-      },
-      50
-    );
+    setTimeout(function () {
+      initModules();
+      setTimeout(drawAll, 50);
+    }, 50);
   }
 
-  // =========================================================
-  // START
-  // =========================================================
 
-  if (
-    document.readyState ===
-    "loading"
-  ) {
+  /* =========================================================
+     START
+     ========================================================= */
 
-    document.addEventListener(
-      "DOMContentLoaded",
-      boot
-    );
-
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
   } else {
-
     boot();
   }
+
+
+  /* =========================================================
+     PUBLIC API
+     ========================================================= */
+
+  window.Main = {
+    fetchGeometryData: fetchGeometryData,
+    calculate: calculate,
+    drawAll: drawAll
+  };
 
 })();
