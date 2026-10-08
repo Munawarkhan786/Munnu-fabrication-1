@@ -857,6 +857,143 @@ select:focus-visible {
 .hidden { display: none !important; }
 
 /* =========================================================
+   RESULT — CUT CARDS (NEW)
+   ========================================================= */
+
+.result-cut-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.result-cut-card {
+  background: var(--dark);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--red);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.result-cut-title {
+  background: #1e2433;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: #f87171;
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+}
+
+.result-cut-body {
+  padding: 8px 12px;
+}
+
+.cut-result-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.cut-result-row:last-child {
+  border-bottom: none;
+}
+
+.cut-result-row span {
+  color: var(--muted);
+}
+
+.cut-result-row strong {
+  color: var(--gold);
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+  text-align: right;
+}
+
+.cut-result-row.cut-missing strong {
+  color: #666;
+  font-style: italic;
+}
+
+.result-no-cut {
+  color: var(--green);
+  font-size: 13px;
+  text-align: center;
+  padding: 20px;
+}
+
+/* Result summary grid */
+.result-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.summary-card {
+  background: var(--dark);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+
+.summary-card strong {
+  display: block;
+  font-size: 22px;
+  color: var(--gold);
+  font-family: 'Courier New', monospace;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.summary-card span {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Result table (bend list) */
+.result-table-wrap {
+  overflow-x: auto;
+  margin-top: 6px;
+}
+
+.result-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.result-table th {
+  background: #1e2433;
+  color: var(--gold);
+  padding: 8px 6px;
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+}
+
+.result-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+.result-table td small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.result-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* =========================================================
    FOOTER
    ========================================================= */
 
@@ -1043,6 +1180,10 @@ select:focus-visible {
   .bugs-list { padding: 8px; }
   .bugs-list .result-row .value { font-size: 10px; }
   .bugs-toggle { font-size: 10px; padding: 3px 8px; }
+
+  .result-cut-title { font-size: 12px; padding: 6px 10px; }
+  .cut-result-row { font-size: 11px; }
+  .summary-card strong { font-size: 18px; }
 }
 
 /* =========================================================
