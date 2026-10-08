@@ -8,6 +8,9 @@
    - Keypad ab STARTUP par band rahega.
    - User "Current Size" (0) par CLICK karega tabhi khulega.
    - Keypad ke bahar click karne par BAND ho jayega.
+
+   V8 CHANGE:
+   - redraw() ab Main.calculate() use karta hai (Worker fetch).
    ========================================================= */
 
 (function () {
@@ -330,10 +333,6 @@
       }
     );
 
-    /* -----------------------------------------
-       DEFAULT: KEYPAD BAND RAKHO
-       ----------------------------------------- */
-
     closeSizeCalculator();
   }
 
@@ -512,8 +511,6 @@
 
     updateSideUI();
     clearInput();
-    // NOTE: Yahan keypad NAHI khulega.
-    // User ko "Current Size" par click karna padega.
   }
 
   function updateSideUI() {
@@ -1305,10 +1302,17 @@
   }
 
   /* =========================================================
-     REDRAW
+     REDRAW — Worker fetch + draw all
      ========================================================= */
 
   function redraw() {
+
+    // ⬇️ YE 4 LINES NAYI HAIN
+    if (window.Main && typeof window.Main.calculate === "function") {
+      window.Main.calculate();
+      return;
+    }
+    // ⬆️ YE 4 LINES NAYI HAIN
 
     try {
 
@@ -1447,10 +1451,6 @@
         };
     }
 
-    /* -----------------------------------------
-       CURRENT SIZE (0) PAR CLICK -> KEYPAD OPEN
-       ----------------------------------------- */
-
     var display =
       $("display");
 
@@ -1469,8 +1469,6 @@
         };
     }
 
-    /* Add */
-
     var add =
       $("btn-add");
 
@@ -1480,8 +1478,6 @@
           addLine();
         };
     }
-
-    /* OK */
 
     var ok =
       $("btn-ok");
@@ -1493,8 +1489,6 @@
         };
     }
 
-    /* Clear */
-
     var clear =
       $("btn-clear");
 
@@ -1504,8 +1498,6 @@
           clearInput();
         };
     }
-
-    /* Edit save */
 
     var editSave =
       $("btn-save-edit");
@@ -1517,8 +1509,6 @@
         };
     }
 
-    /* Edit cancel */
-
     var editCancel =
       $("btn-cancel-edit");
 
@@ -1528,8 +1518,6 @@
           cancelEdit();
         };
     }
-
-    /* Direction */
 
     var up =
       $("direction-up");
@@ -1551,10 +1539,6 @@
         };
     }
 
-    /* -----------------------------------------
-       KEYPAD KE BAHAR CLICK -> KEYPAD BAND
-       ----------------------------------------- */
-
     document.addEventListener(
       "click",
       function (e) {
@@ -1565,17 +1549,12 @@
 
         if (!calc || !frac || !display) return;
 
-        // Agar keypad pehle se band hai toh kuch mat karo
         if (calc.style.display === "none") return;
 
-        // Click keypad ke andar hua?
         if (calc.contains(e.target)) return;
         if (frac.contains(e.target)) return;
-
-        // Click display par hua?
         if (display.contains(e.target)) return;
 
-        // Warna keypad band kar do
         closeSizeCalculator();
       }
     );
@@ -1639,29 +1618,11 @@
 
     try {
 
-      /*
-        FIRST create keypad.
-      */
-
       buildCalculator();
-
-      /*
-        THEN bind buttons.
-      */
-
       bindButtons();
-
       bindKeyboard();
-
       updateSideUI();
-
       render();
-
-      /*
-        Calculator STARTUP par BAND rahega.
-        (buildCalculator ke andar closeSizeCalculator call hai)
-      */
-
       closeSizeCalculator();
 
     } catch (err) {
@@ -1690,59 +1651,24 @@
 
   window.Sheet = {
 
-    init:
-      init,
-
-    render:
-      render,
-
-    addLine:
-      addLine,
-
-    editLine:
-      editLine,
-
-    deleteLine:
-      deleteLine,
-
-    moveUp:
-      moveUp,
-
-    moveDown:
-      moveDown,
-
-    setSide:
-      setSide,
-
-    appendValue:
-      appendValue,
-
-    appendFraction:
-      appendFraction,
-
-    backspace:
-      backspace,
-
-    clear:
-      clearInput,
-
-    cancelEdit:
-      cancelEdit,
-
-    openSizeCalculator:
-      openSizeCalculator,
-
-    closeSizeCalculator:
-      closeSizeCalculator,
-
-    getTotal:
-      getTotal,
-
-    getInputValue:
-      getInputValue,
-
-    setInputValue:
-      setInputValue
+    init: init,
+    render: render,
+    addLine: addLine,
+    editLine: editLine,
+    deleteLine: deleteLine,
+    moveUp: moveUp,
+    moveDown: moveDown,
+    setSide: setSide,
+    appendValue: appendValue,
+    appendFraction: appendFraction,
+    backspace: backspace,
+    clear: clearInput,
+    cancelEdit: cancelEdit,
+    openSizeCalculator: openSizeCalculator,
+    closeSizeCalculator: closeSizeCalculator,
+    getTotal: getTotal,
+    getInputValue: getInputValue,
+    setInputValue: setInputValue
   };
 
 })();
