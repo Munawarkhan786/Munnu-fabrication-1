@@ -1,19 +1,19 @@
 /* =========================================================
    RESULT.JS — MASTER RESULT DISPLAY V7
    ---------------------------------------------------------
-   GeometryEngine = ONLY calculation source
+   GeometryEngine ab CLOUDFLARE WORKER pe hai (server pe).
    Result.js     = ONLY display layer
-
-   Shows:
-   1. Size Totals
-   2. Bend List
-   3. Cup Cut List
-   4. Summary
-   5. Settings / Material
    ========================================================= */
 
 (function () {
   "use strict";
+
+  /* =========================================================
+     WORKER SETUP — geometry ab server pe hai
+     ========================================================= */
+
+  var WORKER_URL = 'https://munnu-fabrication-worker.munawarkhan487.workers.dev';
+  var API_KEY = 'munnu-secret-2026-xyz-987';
 
   /* =========================================================
      HELPERS
@@ -60,21 +60,34 @@
   }
 
   /* =========================================================
-     GEOMETRY MASTER
+     GEOMETRY MASTER — Worker se fetch karo
      ========================================================= */
 
-  function getMasterData() {
-    if (
-      !window.GeometryEngine ||
-      typeof window.GeometryEngine.analyze !== "function"
-    ) {
-      return null;
-    }
-
+  async function getMasterData() {
     try {
-      return window.GeometryEngine.analyze(getState());
+      var state = getState();
+
+      var response = await fetch(WORKER_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': API_KEY
+        },
+        body: JSON.stringify({
+          settings: state.settings || window.settings || {},
+          lenLines: state.lenLines || [],
+          depLines: state.depLines || []
+        })
+      });
+
+      if (!response.ok) {
+        console.error('RESULT: Worker error', response.status);
+        return null;
+      }
+
+      return await response.json();
     } catch (err) {
-      console.error("RESULT: GeometryEngine failed", err);
+      console.error('RESULT: Fetch error', err);
       return null;
     }
   }
@@ -124,11 +137,6 @@
         ? totals.depthMM
         : depthIn * 25.4
     );
-
-    /*
-      Existing UI may have any of these IDs.
-      We safely update whichever exists.
-    */
 
     setText("result-length", inch(lengthIn) + '"');
     setText("result-depth", inch(depthIn) + '"');
@@ -542,26 +550,26 @@
   }
 
   /* =========================================================
-     FULL RENDER
+     FULL RENDER — ab async hai
      ========================================================= */
 
-  function render() {
-    var data = getMasterData();
+  async function render() {
+    var data = await getMasterData();
 
     if (!data) {
       setText(
         "result-status",
-        "Geometry Engine not available"
+        "Worker se data nahi aaya — internet check karo"
       );
 
       setHTML(
         "result-bends",
-        '<div class="result-empty">Geometry Engine unavailable.</div>'
+        '<div class="result-empty">Worker unavailable.</div>'
       );
 
       setHTML(
         "result-cuts",
-        '<div class="result-empty">Geometry Engine unavailable.</div>'
+        '<div class="result-empty">Worker unavailable.</div>'
       );
 
       return null;
@@ -581,8 +589,8 @@
      INIT
      ========================================================= */
 
-  function init() {
-    render();
+  async function init() {
+    await render();
   }
 
   /* =========================================================
@@ -595,9 +603,6 @@
     getMasterData: getMasterData
   };
 
-  /*
-    Compatibility alias
-  */
   window.ResultView = window.Result;
 
 })();
