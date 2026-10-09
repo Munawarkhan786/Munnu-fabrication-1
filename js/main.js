@@ -1,12 +1,10 @@
 /* =========================================================
-   MAIN.JS — APP STARTER
+   MAIN.JS — APP STARTER (V2)
    =========================================================
-   Geometry ab CLOUDFLARE WORKER pe hai (server pe).
-
-   main.js:
-   - Worker se EK BAAR fetch karta hai
-   - window.currentGeometryData me store karta hai
-   - flat.js / 3d.js / result.js usko use karte hain
+   - Worker se EK BAAR fetch (Calculate pe)
+   - Data localStorage me SAVE (refresh/browser band pe bhi rahega)
+   - Sirf naya Calculate pe purana data REPLACE
+   - Error pe purana data safe
    ========================================================= */
 
 (function () {
@@ -18,17 +16,52 @@
 
   var WORKER_URL = 'https://munnu-fabrication-worker.munawarkhan487.workers.dev';
   var API_KEY = 'munnu-secret-2026-xyz-987';
-
-
-  /* =========================================================
-     GLOBAL DATA STORE
-     ========================================================= */
+  var STORAGE_KEY = 'munnu_geometry_data_v1';
 
   window.currentGeometryData = null;
 
+  /* =========================================================
+     LOCAL STORAGE — SAVE / LOAD
+     ========================================================= */
+
+  function saveGeometryToStorage(data) {
+    if (!data) return;
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      console.log("💾 Geometry data saved to localStorage");
+    } catch (err) {
+      console.warn("⚠️ Storage save failed:", err);
+    }
+  }
+
+  function loadGeometryFromStorage() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+
+      var data = JSON.parse(raw);
+      if (data && data.version) {
+        console.log("✅ Geometry data loaded from localStorage");
+        return data;
+      }
+
+      return null;
+    } catch (err) {
+      console.warn("⚠️ Storage load failed:", err);
+      return null;
+    }
+  }
+
+  function clearGeometryStorage() {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      console.log("🗑️ Geometry storage cleared");
+    } catch (err) { /* ignore */ }
+  }
 
   /* =========================================================
-     FETCH GEOMETRY FROM WORKER (EK BAAR)
+     FETCH GEOMETRY FROM WORKER
      ========================================================= */
 
   async function fetchGeometryData() {
@@ -52,23 +85,27 @@
 
       if (!response.ok) {
         console.error('❌ Worker error:', response.status);
-        window.currentGeometryData = null;
+        // Purana data safe rahega — null nahi karte
         return null;
       }
 
       var data = await response.json();
+
+      // Naya data store
       window.currentGeometryData = data;
 
-      console.log("✅ Geometry data ready");
+      // localStorage me save (refresh pe rahega)
+      saveGeometryToStorage(data);
+
+      console.log("✅ Geometry data aa gaya + save ho gaya");
       return data;
 
     } catch (err) {
       console.error('❌ Fetch error:', err);
-      window.currentGeometryData = null;
+      // Purana data safe rahega
       return null;
     }
   }
-
 
   /* =========================================================
      MODULE LIST
@@ -85,13 +122,11 @@
     { name: "UI",       label: "🎨 UI",       priority: 8 }
   ];
 
-
   function sortModules() {
     MODULES.sort(function (a, b) {
       return (a.priority || 999) - (b.priority || 999);
     });
   }
-
 
   /* =========================================================
      CHECK CORE
@@ -110,7 +145,6 @@
 
     return ok;
   }
-
 
   /* =========================================================
      LOAD PERSISTED DATA
@@ -140,7 +174,6 @@
       console.error("❌ App data load error:", err);
     }
   }
-
 
   /* =========================================================
      INIT ONE MODULE
@@ -177,7 +210,6 @@
     }
   }
 
-
   /* =========================================================
      INIT ALL MODULES
      ========================================================= */
@@ -203,7 +235,6 @@
       console.warn("⚠️ appReady event failed:", err);
     }
   }
-
 
   /* =========================================================
      DRAW ALL VIEWS
@@ -235,27 +266,35 @@
     }
   }
 
-
   /* =========================================================
-     CALCULATE — 1 fetch + sab draw
+     CALCULATE — UI se call hoga
+     ---------------------------------------------------------
+     EK BAAR fetch → sab views draw
      ========================================================= */
 
   async function calculate() {
-    console.log("⚙️ Calculate...");
+    console.log("⚙️ Calculate shuru...");
 
+    // Worker se naya data fetch (EK BAAR)
     var data = await fetchGeometryData();
 
     if (!data) {
-      console.warn("⚠️ Data nahi aaya");
-      return null;
+      console.warn("⚠️ Data nahi aaya — purana data dikha rahe hain");
+
+      // Purana data agar hai, to wahi dikhao
+      if (window.currentGeometryData) {
+        drawAll();
+      }
+
+      return window.currentGeometryData;
     }
 
+    // Sab views update karo
     drawAll();
 
     console.log("✅ Sab views update");
     return data;
   }
-
 
   /* =========================================================
      BOOT
@@ -267,14 +306,21 @@
     checkCore();
     loadPersistedData();
 
-    await fetchGeometryData();
+    // PEHLE localStorage se data load karo
+    var saved = loadGeometryFromStorage();
+
+    if (saved) {
+      window.currentGeometryData = saved;
+      console.log("✅ Purana geometry data mil gaya — views update karenge");
+    } else {
+      console.log("📭 Koi saved data nahi — khaali views");
+    }
 
     setTimeout(function () {
       initModules();
       setTimeout(drawAll, 50);
     }, 50);
   }
-
 
   /* =========================================================
      START
@@ -286,7 +332,6 @@
     boot();
   }
 
-
   /* =========================================================
      PUBLIC API
      ========================================================= */
@@ -294,7 +339,9 @@
   window.Main = {
     fetchGeometryData: fetchGeometryData,
     calculate: calculate,
-    drawAll: drawAll
+    drawAll: drawAll,
+    loadGeometryFromStorage: loadGeometryFromStorage,
+    clearGeometryStorage: clearGeometryStorage
   };
 
 })();
