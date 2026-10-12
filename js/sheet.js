@@ -47,6 +47,12 @@
     return String(Math.round(n * 10000) / 10000);
   }
 
+  /* V10: angle 0 valid hai (BASE). Pehle "line.angle || 90" 0 ko 90 bana deta tha */
+  function angleOf(line) {
+    var a = parseFloat(line && line.angle);
+    return Number.isFinite(a) ? a : 90;
+  }
+
   function getLines(side) {
     var state = getState();
     if (side === "dep") {
@@ -278,6 +284,18 @@
     return "DOWN";
   }
 
+  function getSelectedDoor() {
+    var d = $("door-yes");
+    return !!(d && d.classList.contains("active"));
+  }
+
+  function setDoorUI(isDoor) {
+    var yes = $("door-yes");
+    var no = $("door-no");
+    if (yes) yes.classList.toggle("active", !!isDoor);
+    if (no) no.classList.toggle("active", !isDoor);
+  }
+
   function setDirectionUI(direction) {
     var up = $("direction-up");
     var down = $("direction-down");
@@ -303,6 +321,7 @@
     var side = getActiveSide();
     var angle = getSelectedAngle();
     var direction = getSelectedDirection();
+    var door = getSelectedDoor();
     var lines = getLines(side);
 
     if (state.editMode && state.editingLine) {
@@ -312,6 +331,7 @@
         lines[editIndex].size = size;
         lines[editIndex].angle = angle;
         lines[editIndex].direction = direction;
+        lines[editIndex].door = door;
 
         state.editMode = false;
         state.editingLine = null;
@@ -333,7 +353,8 @@
       index: lines.length,
       size: size,
       angle: angle,
-      direction: direction
+      direction: direction,
+      door: door
     });
 
     renumberLines(side);
@@ -361,9 +382,10 @@
     setInputValue(line.size);
 
     var angle = $("angle-select");
-    if (angle) angle.value = String(line.angle || 90);
+    if (angle) angle.value = String(angleOf(line));
 
     setDirectionUI(line.direction || "UP");
+    setDoorUI(!!line.door);
 
     var bar = $("edit-bar");
     var info = $("edit-info");
@@ -415,6 +437,18 @@
     save();
   }
 
+  function setLineDoor(side, index, value) {
+    var lines = getLines(side);
+    index = parseInt(index, 10);
+    if (index < 0 || index >= lines.length) return;
+
+    lines[index].door = !!value;
+
+    setLines(side, lines);
+    render();
+    save();
+  }
+
   var ANGLE_OPTIONS = [
     180, 135, 120, 110, 100, 90, 80, 75, 65, 60,
     55, 45, 35, 30, 25, 20, 15, 10, 5, 0
@@ -425,7 +459,7 @@
     index = parseInt(index, 10);
     if (index < 0 || index >= lines.length) return;
 
-    var current = lines[index].angle || 90;
+    var current = angleOf(lines[index]);
     var old = $("angle-picker-modal");
     if (old && old.parentNode) old.parentNode.removeChild(old);
 
@@ -444,7 +478,7 @@
 
     var title = document.createElement("div");
     title.textContent = "Bend Angle — " + (side === "dep" ? "D" : "L") + (index + 1) +
-      "  (now: " + current + "°)";
+      "  (now: " + current + "°)  ·  0° = BASE";
     title.style.cssText =
       "color:#fbbf24;font:700 14px/1.4 Arial,sans-serif;" +
       "margin-bottom:12px;text-align:center;";
@@ -557,6 +591,54 @@
     renderList("dep", $("dep-lines-list"));
     updateTotals();
     updateSideUI();
+    updateBaseHint();
+  }
+
+  /* BASE chip: 0° wali lines = base. Koi 0° nahi to Calculate ke baad
+     engine ne jo line auto-base chuni, use "BASE auto" dikhao. */
+  function baseChipFor(side, index, line) {
+    if (angleOf(line) <= 0.01) return "base";
+
+    var data = window.currentGeometryData;
+    var lines = getLines(side);
+    if (!data || !data.base) return null;
+
+    var info = side === "dep" ? data.base.depth : data.base.length;
+    var count = side === "dep"
+      ? (data.depthLines || []).length
+      : (data.lengthLines || []).length;
+
+    if (!info || !info.auto || count !== lines.length) return null;
+    if (index >= info.start && index <= info.end) return "auto";
+    return null;
+  }
+
+  function updateBaseHint() {
+    var host = $("len-lines-list");
+    var wrap = host && host.parentNode ? host.parentNode.parentNode || host.parentNode : null;
+    if (!host || !wrap) return;
+
+    var el = $("base-hint");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "base-hint";
+      el.className = "base-hint";
+      wrap.insertBefore(el, wrap.firstChild);
+    }
+
+    var msgs = [];
+    ["len", "dep"].forEach(function (side) {
+      var lines = getLines(side);
+      if (!lines.length) return;
+      var hasZero = lines.some(function (l) { return angleOf(l) <= 0.01; });
+      if (!hasZero) {
+        msgs.push((side === "dep" ? "DEPTH" : "LENGTH") +
+          " me koi 0° (BASE) line nahi — sabse badi line base maani jayegi. Base line ko 0° do.");
+      }
+    });
+
+    el.style.display = msgs.length ? "block" : "none";
+    el.textContent = msgs.join("  ");
   }
 
   function renderList(side, container) {
@@ -581,6 +663,20 @@
       name.className = "line-name";
       name.textContent = (side === "dep" ? "D" : "L") + (index + 1);
 
+      var chipKind = baseChipFor(side, index, line);
+      if (chipKind) {
+        var chip = document.createElement("span");
+        chip.className = "line-chip " + (chipKind === "auto" ? "auto" : "base");
+        chip.textContent = chipKind === "auto" ? "BASE auto" : "BASE";
+        name.appendChild(chip);
+      }
+      if (line.door) {
+        var dchip = document.createElement("span");
+        dchip.className = "line-chip door";
+        dchip.textContent = "DOOR";
+        name.appendChild(dchip);
+      }
+
       var size = document.createElement("span");
       size.className = "line-size";
       size.textContent = formatSize(line.size) + '"';
@@ -588,7 +684,7 @@
       var angleBtn = document.createElement("button");
       angleBtn.type = "button";
       angleBtn.className = "line-angle";
-      angleBtn.textContent = String(line.angle || 90) + "°";
+      angleBtn.textContent = String(angleOf(line)) + "°";
       angleBtn.onclick = function () { openAnglePicker(side, index); };
 
       var direction = document.createElement("span");
@@ -615,6 +711,13 @@
       down.textContent = "↓";
       down.onclick = function () { setLineDirection(side, index, "DOWN"); };
 
+      var doorBtn = document.createElement("button");
+      doorBtn.type = "button";
+      doorBtn.className = "line-btn door";
+      if (line.door) doorBtn.classList.add("active");
+      doorBtn.textContent = "🚪";
+      doorBtn.onclick = function () { setLineDoor(side, index, !line.door); };
+
       var del = document.createElement("button");
       del.type = "button";
       del.className = "line-btn delete";
@@ -628,6 +731,7 @@
       row.appendChild(edit);
       row.appendChild(up);
       row.appendChild(down);
+      row.appendChild(doorBtn);
       row.appendChild(del);
 
       container.appendChild(row);
@@ -743,6 +847,11 @@
     var editCancel = $("btn-cancel-edit");
     if (editCancel) editCancel.onclick = function () { cancelEdit(); };
 
+    var doorYes = $("door-yes");
+    var doorNo = $("door-no");
+    if (doorYes) doorYes.onclick = function () { setDoorUI(true); };
+    if (doorNo) doorNo.onclick = function () { setDoorUI(false); };
+
     var up = $("direction-up");
     var down = $("direction-down");
     if (up) up.onclick = function () { setDirectionUI("UP"); };
@@ -810,6 +919,7 @@
     deleteLine: deleteLine,
     setLineDirection: setLineDirection,
     setLineAngle: setLineAngle,
+    setLineDoor: setLineDoor,
     openAnglePicker: openAnglePicker,
     setSide: setSide,
     appendValue: appendValue,
