@@ -1242,3 +1242,39 @@ select:focus-visible {
     margin-top: 10px;
   }
 }
+
+
+/* ===== V10 additions ===== */
+.calc-status {
+  margin: 0 12px 70px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font: 13px/1.5 Arial, sans-serif;
+  background: #1f2937;
+  color: #e8e8e8;
+  border: 1px solid #374151;
+}
+.calc-status.error { background: #3b1219; border-color: #7f1d1d; color: #fecaca; }
+.calc-status.warn  { background: #3a2e0e; border-color: #854d0e; color: #fde68a; }
+.calc-status.ok    { background: #0f2a1d; border-color: #166534; color: #bbf7d0; }
+.line-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-left: 4px;
+  border-radius: 4px;
+  font: 700 10px Arial, sans-serif;
+  vertical-align: middle;
+}
+.line-chip.base { background: #16a34a; color: #fff; }
+.line-chip.auto { background: #ca8a04; color: #fff; }
+.line-chip.door { background: #2563eb; color: #fff; }
+.line-btn.door.active { background: #2563eb; color: #fff; }
+.base-hint {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font: 12px/1.4 Arial, sans-serif;
+  background: #3a2e0e;
+  color: #fde68a;
+  border: 1px solid #854d0e;
+}
