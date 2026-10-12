@@ -14,9 +14,13 @@
      WORKER SETUP
      ========================================================= */
 
-  var WORKER_URL = 'https://munnu-fabrication-worker.munawarkhan487.workers.dev';
-  var API_KEY = 'munnu-secret-2026-xyz-987';
-  var STORAGE_KEY = 'munnu_geometry_data_v1';
+  var CFG = window.MUNNU_CONFIG || {};
+  var WORKER_URL = CFG.WORKER_URL || "";
+  var API_KEY = CFG.API_KEY || "";
+  var TIMEOUT_MS = CFG.TIMEOUT_MS || 20000;
+  var STORAGE_KEY = 'munnu_geometry_data_v2';
+  var MIN_VERSION_TAG = "V8_3";   // purana data (V8.2) dobara calculate hoga
+  var calcCounter = 0;
 
   window.currentGeometryData = null;
 
@@ -41,7 +45,7 @@
       if (!raw) return null;
 
       var data = JSON.parse(raw);
-      if (data && data.version) {
+      if (data && data.version && String(data.version).indexOf(MIN_VERSION_TAG) >= 0) {
         console.log("✅ Geometry data loaded from localStorage");
         return data;
       }
@@ -64,11 +68,49 @@
      FETCH GEOMETRY FROM WORKER
      ========================================================= */
 
+  function setStatus(kind, text) {
+    var el = document.getElementById("calc-status");
+    if (!el) return;
+    if (!text) { el.style.display = "none"; el.textContent = ""; return; }
+    el.className = "calc-status " + (kind || "");
+    el.textContent = text;
+    el.style.display = "block";
+  }
+
+  function explainHttp(status) {
+    if (status === 404) return "Worker nahi mila (404). Worker ka URL badla/delete hua hoga — js/config.js me WORKER_URL check karo.";
+    if (status === 401) return "API key galat hai (401). js/config.js ki API_KEY aur Worker ki key same honi chahiye.";
+    if (status === 403) return "Origin allow nahi hai (403). Worker ke ALLOWED_ORIGINS me website ka link daalo.";
+    if (status === 429) return "Bahut zyada requests (429). Thodi der baad try karo.";
+    if (status >= 500) return "Worker me error (" + status + "). Worker ka log dekho.";
+    return "Worker error " + status;
+  }
+
+  function warningsText(data) {
+    var list = (data && data.warnings) || [];
+    var keep = list.filter(function (w) {
+      return w.code === "NO_ZERO_BASE" || w.code === "MULTI_BASE" ||
+        w.code === "NEEDS_BOTH_SIDES" || w.code === "ANGLE_MISSING" ||
+        w.code === "SIZE_INVALID" || w.code === "SIZE_ZERO";
+    });
+    return keep.map(function (w) { return w.message; }).join("  ");
+  }
+
   async function fetchGeometryData() {
     var state = window.AppState || window.state || {};
+    var myCall = ++calcCounter;
+
+    if (!WORKER_URL) {
+      setStatus("error", "Worker URL set nahi hai. js/config.js me WORKER_URL daalo.");
+      return null;
+    }
+
+    var controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, TIMEOUT_MS) : null;
 
     try {
       console.log("🔄 Worker se data fetch...");
+      setStatus("", "⏳ Calculate ho raha hai...");
 
       var response = await fetch(WORKER_URL, {
         method: 'POST',
@@ -80,21 +122,34 @@
           settings: state.settings || window.settings || {},
           lenLines: state.lenLines || [],
           depLines: state.depLines || []
-        })
+        }),
+        signal: controller ? controller.signal : undefined
       });
 
       if (!response.ok) {
         console.error('❌ Worker error:', response.status);
-        // Purana data safe rahega — null nahi karte
+        setStatus("error", "❌ " + explainHttp(response.status) + " (purana data dikh raha hai)");
         return null;
       }
 
       var data = await response.json();
 
-      // Naya data store
-      window.currentGeometryData = data;
+      /* purani (slow) call ka jawab naye ko overwrite na kare */
+      if (myCall !== calcCounter) { return null; }
 
-      // localStorage me save (refresh pe rahega)
+      var errs = data && data.validation && data.validation.errors;
+      if (errs && errs.length && errs[0].code !== "NO_INPUT") {
+        setStatus("error", "❌ " + errs.map(function (e) { return e.message; }).join(" | "));
+      } else {
+        var wt = warningsText(data);
+        if (wt) { setStatus("warn", "⚠ " + wt); }
+        else { setStatus("ok", "✅ Calculate ho gaya"); setTimeout(function () {
+          var el = document.getElementById("calc-status");
+          if (el && el.classList.contains("ok")) { setStatus("", ""); }
+        }, 2500); }
+      }
+
+      window.currentGeometryData = data;
       saveGeometryToStorage(data);
 
       console.log("✅ Geometry data aa gaya + save ho gaya");
@@ -102,8 +157,13 @@
 
     } catch (err) {
       console.error('❌ Fetch error:', err);
-      // Purana data safe rahega
+      var msg = (err && err.name === "AbortError")
+        ? "Worker ne " + Math.round(TIMEOUT_MS / 1000) + " sec me jawab nahi diya."
+        : "Worker tak pahunch nahi paaye (internet ya Worker URL/CORS).";
+      setStatus("error", "❌ " + msg + " (purana data dikh raha hai)");
       return null;
+    } finally {
+      if (timer) { clearTimeout(timer); }
     }
   }
 
@@ -241,6 +301,15 @@
      ========================================================= */
 
   function drawAll() {
+    /* lines ki list dobara (BASE auto chip naye data se) */
+    try {
+      if (window.Sheet && typeof window.Sheet.render === "function") {
+        window.Sheet.render();
+      }
+    } catch (err) {
+      console.error("❌ Sheet render error:", err);
+    }
+
     try {
       if (window.Flat && typeof window.Flat.draw === "function") {
         window.Flat.draw();
