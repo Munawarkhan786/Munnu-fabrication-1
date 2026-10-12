@@ -9,7 +9,7 @@
    ========================================================= */
 
 window.MUNNU_CONFIG = {
-  WORKER_URL: "https://munnu-fabrication-worker.munawarkhan487.workers.dev,
-  API_KEY: "API_KEY9959075137",
+  WORKER_URL: ",
+  API_KEY: "",
   TIMEOUT_MS: 20000
 };
