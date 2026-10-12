@@ -180,6 +180,19 @@
       "sum-dep",
       inch(depthIn) + '"'
     );
+  
+    /* V10: Size Totals card (math-result) bhi bharo */
+    var mode = data.settings && data.settings.allowanceMode === "SHOP"
+      ? "Shop (auto deduction)" : "As Entered";
+    setHTML(
+      "math-result",
+      '<div class="result-row"><span class="label">Sheet Length</span><span class="value">' +
+        inch(lengthIn) + '" <small>(' + mm(lengthMM) + " mm)</small></span></div>" +
+      '<div class="result-row"><span class="label">Sheet Depth</span><span class="value">' +
+        inch(depthIn) + '" <small>(' + mm(depthMM) + " mm)</small></span></div>" +
+      '<div class="result-row"><span class="label">Marking Mode</span><span class="value">' +
+        esc(mode) + "</span></div>"
+    );
   }
 
   /* =========================================================
@@ -300,136 +313,53 @@
     var html = "";
 
     if (!list.length) {
-      html =
-        '<div class="empty-hint">' +
-        "No bend lines yet." +
-        "</div>";
-
+      html = '<div class="empty-hint">No bend lines yet.</div>';
       setHTML("result-bends", html);
       setHTML("bend-list", html);
       setHTML("result-bend-list", html);
-      setHTML("result-list", html);
-
-      return;
+        return;
     }
 
-    html += '<div class="result-table-wrap">';
-    html += '<table class="result-table">';
+    var byId = {};
+    (data.lengthLines || []).concat(data.depthLines || []).forEach(function (l) {
+      byId[l.side + ":" + l.id] = l;
+    });
 
-    html += "<thead>";
-    html += "<tr>";
+    var shop = data.settings && data.settings.allowanceMode === "SHOP";
 
-    html += "<th>#</th>";
-    html += "<th>ID</th>";
-    html += "<th>Side</th>";
-    html += "<th>Size</th>";
-    html += "<th>Angle</th>";
-    html += "<th>Dir</th>";
-
-    html += "</tr>";
-    html += "</thead>";
-
-    html += "<tbody>";
+    html += '<div class="result-table-wrap"><table class="result-table"><thead><tr>';
+    html += "<th>#</th><th>ID</th><th>Side</th><th>Size</th>";
+    if (shop) { html += "<th>Mark</th>"; }
+    html += "<th>Angle</th><th>Dir</th><th>Press</th></tr></thead><tbody>";
 
     list.forEach(function (line, i) {
-
-      var side =
-        String(line.side || "").toLowerCase() === "depth"
-          ? "DEPTH"
-          : "LENGTH";
-
-      var direction =
-        String(
-          line.direction ||
-          line.bend ||
-          ""
-        ).toLowerCase();
-
-      direction =
-        direction === "down"
-          ? "DOWN"
-          : "UP";
-
-      var sizeIn =
-        line.sizeInch != null
-          ? line.sizeInch
-          : line.size;
-
-      var a =
-        line.angle != null
-          ? line.angle
-          : 0;
+      var full = byId[line.side + ":" + line.id] || line;
+      var side = String(line.side || "").toLowerCase() === "depth" ? "DEPTH" : "LENGTH";
+      var isBase = !!full.isBase;
+      var dirText = isBase ? "—" :
+        (String(line.direction || "").toLowerCase() === "down" ? "DOWN" : "UP");
+      var angleText = isBase ? "0° BASE" : angle(line.angle) + "°";
+      var tag = full.isDoor ? " 🚪" : "";
 
       html += "<tr>";
-
-      html +=
-        "<td>" +
-        esc(i + 1) +
-        "</td>";
-
-      html +=
-        "<td>" +
-        esc(
-          line.id ||
-          ("B" + (i + 1))
-        ) +
-        "</td>";
-
-      html +=
-        "<td>" +
-        esc(side) +
-        "</td>";
-
-      html +=
-        '<td>' +
-        inch(sizeIn) +
-        '"';
-
-      if (line.sizeMM != null) {
-        html +=
-          " <small>(" +
-          mm(line.sizeMM) +
-          " mm)</small>";
+      html += "<td>" + esc(i + 1) + "</td>";
+      html += "<td>" + esc(line.id || ("B" + (i + 1))) + tag + "</td>";
+      html += "<td>" + esc(side) + "</td>";
+      html += "<td>" + inch(line.sizeInch != null ? line.sizeInch : line.size) + '"</td>';
+      if (shop) {
+        html += "<td>" + (isBase ? "—" : inch(line.markSizeInch) + '"') + "</td>";
       }
-
-      html += "</td>";
-
-      html +=
-        "<td>" +
-        angle(a) +
-        "°</td>";
-
-      html +=
-        "<td>" +
-        esc(direction) +
-        "</td>";
-
+      html += "<td>" + esc(angleText) + "</td>";
+      html += "<td>" + esc(dirText) + "</td>";
+      html += "<td>" + (isBase || !(num(line.pressAngle) > 0) ? "—" : angle(line.pressAngle) + "°") + "</td>";
       html += "</tr>";
     });
 
-    html += "</tbody>";
-    html += "</table>";
-    html += "</div>";
+    html += "</tbody></table></div>";
 
-    setHTML(
-      "result-bends",
-      html
-    );
-
-    setHTML(
-      "bend-list",
-      html
-    );
-
-    setHTML(
-      "result-bend-list",
-      html
-    );
-
-    setHTML(
-      "result-list",
-      html
-    );
+    setHTML("result-bends", html);
+    setHTML("bend-list", html);
+    setHTML("result-bend-list", html);
   }
 
   /* =========================================================
@@ -461,502 +391,96 @@
      ========================================================= */
 
   function renderCuts(data) {
-    var cuts =
-      Array.isArray(data.cuts)
-        ? data.cuts
-        : [];
-
+    var cuts = Array.isArray(data.cuts) ? data.cuts : [];
     var html = "";
 
-    /* -------------------------------------------------------
-       NO CUT
-       ------------------------------------------------------- */
+    function both(inchVal) {
+      return inch(inchVal) + '" <small>(' + mm(num(inchVal) * 25.4) + " mm)</small>";
+    }
+
+    function row(label, valueHtml) {
+      return '<div class="cut-result-row"><span>' + esc(label) +
+        "</span><strong>" + valueHtml + "</strong></div>";
+    }
+
+    function setAll(h) {
+      setHTML("result-cuts", h);
+      setHTML("cup-cut-list", h);
+      setHTML("result-cup-cuts", h);
+    }
 
     if (!cuts.length) {
-
-      html =
-        '<div class="empty-hint result-no-cut">' +
-        "✓ No cup cuts required." +
-        "</div>";
-
-      setHTML(
-        "result-cuts",
-        html
-      );
-
-      setHTML(
-        "cup-cut-list",
-        html
-      );
-
-      setHTML(
-        "result-cup-cuts",
-        html
-      );
-
+      setAll('<div class="empty-hint result-no-cut">✓ No cup cuts required.</div>');
       return;
     }
 
-    /* -------------------------------------------------------
-       CUT CARDS
-       ------------------------------------------------------- */
-
-    html +=
-      '<div class="result-cut-list">';
+    html += '<div class="result-cut-list">';
 
     cuts.forEach(function (cut, i) {
+      var corner = cut.corner || {};
+      var where =
+        (corner.depthSide === "FAR" ? "neeche" : "upar") + "-" +
+        (corner.lengthSide === "RIGHT" ? "right" : "left");
 
-      /* =====================================================
-         CUT ID
-         ===================================================== */
+      var mit = cut.miter || {};
+      var marks = cut.marks || {};
+      var origin = marks.origin || null;
+      var polys = marks.polygons || [];
+      var isMiter = cut.type === "MITER_CUT" && mit.mode === "MITER" &&
+        cut.subtype !== "MITER_90";
+      var isSquare = cut.subtype === "MITER_90";
 
-      var cutId =
-        cut.id ||
-        cut.cutId ||
-        (
-          "CUT_" +
-          String(i + 1).padStart(2, "0")
-        );
+      html += '<div class="result-cut-card">';
+      html += '<div class="result-cut-title"><strong>✂ Cut ' + (i + 1) + " — " +
+        esc(where) + " corner (" + esc(cut.lengthId) + " × " + esc(cut.depthId) + ")</strong></div>";
+      html += '<div class="result-cut-body">';
 
+      html += row("Type", isSquare
+        ? "Seedha cup cut (90° corner, chaukor)"
+        : (isMiter
+          ? "Angle cut (miter) — dono patti ek hi taraf"
+          : "Poora corner cut — ulti taraf / hem"));
 
-      /* =====================================================
-         LENGTH ID
-         ===================================================== */
+      html += row("Corner block", both(cut.widthInch) + " × " + both(cut.depthInch));
 
-      var lengthId =
-        cut.lengthId ||
-        cut.lengthID ||
-        cut.lengthLineId ||
-        "—";
-
-
-      /* =====================================================
-         DEPTH ID
-         ===================================================== */
-
-      var depthId =
-        cut.depthId ||
-        cut.depthID ||
-        cut.depthLineId ||
-        "—";
-
-
-      /* =====================================================
-         LENGTH SIDE SIZE
-         ===================================================== */
-
-      var lengthSize = null;
-
-      if (cut.lengthInch != null) {
-
-        lengthSize =
-          cut.lengthInch;
-
-      } else if (cut.lengthSizeInch != null) {
-
-        lengthSize =
-          cut.lengthSizeInch;
-
-      } else if (cut.lengthSize != null) {
-
-        lengthSize =
-          cut.lengthSize;
-
-      } else if (cut.widthInch != null) {
-
-        lengthSize =
-          cut.widthInch;
+      if (origin) {
+        var fl = num(origin.fromLeft && origin.fromLeft.inch);
+        var fr = num(origin.fromRight && origin.fromRight.inch);
+        var ft = num(origin.fromTop && origin.fromTop.inch);
+        var fb = num(origin.fromBottom && origin.fromBottom.inch);
+        html += row("O point (cut yahin se)",
+          (fl <= fr ? both(fl) + " left se" : both(fr) + " right se") + ", " +
+          (ft <= fb ? both(ft) + " upar se" : both(fb) + " neeche se"));
       }
 
+      if (isMiter) {
+        html += row("Cut angle (wedge)", angle(mit.wedgeDeg) + "°");
+        html += row("Length side kinara", angle(mit.lengthEdgeDeg) + "°");
+        html += row("Depth side kinara", angle(mit.depthEdgeDeg) + "°");
 
-      /* =====================================================
-         DEPTH SIDE SIZE
-         ===================================================== */
-
-      var depthSize = null;
-
-      if (cut.depthInch != null) {
-
-        depthSize =
-          cut.depthInch;
-
-      } else if (cut.depthSizeInch != null) {
-
-        depthSize =
-          cut.depthSizeInch;
-
-      } else if (cut.depthSize != null) {
-
-        depthSize =
-          cut.depthSize;
-
-      } else if (cut.depthMM != null) {
-
-        depthSize =
-          num(cut.depthMM) / 25.4;
+        polys.forEach(function (poly) {
+          if (poly.kind !== "WEDGE" && poly.kind !== "TRIM") { return; }
+          poly.edges.forEach(function (edge) {
+            var t = both(edge.length && edge.length.inch);
+            if (edge.axis === null) { t += " @" + angle(edge.angleDeg) + "°"; }
+            html += row(poly.kind + " " + edge.from + "→" + edge.to, t);
+          });
+        });
       }
 
-
-      /* =====================================================
-         OLD WIDTH/DEPTH MM SUPPORT
-         ===================================================== */
-
-      if (
-        lengthSize == null &&
-        cut.widthMM != null
-      ) {
-        lengthSize =
-          num(cut.widthMM) / 25.4;
+      if (num(mit.closureGapInch) > 1e-6) {
+        html += row("Closure gap", inch(mit.closureGapInch) + '"');
       }
 
-      if (
-        depthSize == null &&
-        cut.depthMM != null
-      ) {
-        depthSize =
-          num(cut.depthMM) / 25.4;
+      if (cut.needsCheck) {
+        html += row("⚠ Check", esc(cut.reason || "asli sheet pe check karo"));
       }
 
-
-      /* =====================================================
-         CUT ANGLE
-         ===================================================== */
-
-      var cutAngle = null;
-
-      if (cut.cutAngle != null) {
-
-        cutAngle =
-          cut.cutAngle;
-
-      } else if (cut.angle != null) {
-
-        cutAngle =
-          cut.angle;
-
-      } else if (cut.miterAngle != null) {
-
-        cutAngle =
-          cut.miterAngle;
-
-      } else if (cut.miterAngleDeg != null) {
-
-        cutAngle =
-          cut.miterAngleDeg;
-      }
-
-
-      /* =====================================================
-         CUT LENGTH
-         ===================================================== */
-
-      var cutLength = null;
-
-      if (cut.cutLengthInch != null) {
-
-        cutLength =
-          cut.cutLengthInch;
-
-      } else if (cut.cutLength != null) {
-
-        cutLength =
-          cut.cutLength;
-
-      } else if (cut.miterLengthInch != null) {
-
-        cutLength =
-          cut.miterLengthInch;
-
-      } else if (cut.miterLength != null) {
-
-        cutLength =
-          cut.miterLength;
-
-      } else if (cut.lengthCut != null) {
-
-        cutLength =
-          cut.lengthCut;
-
-      } else if (cut.cutLengthMM != null) {
-
-        cutLength =
-          num(cut.cutLengthMM) / 25.4;
-      }
-
-
-      /* =====================================================
-         CUT DEPTH
-         ===================================================== */
-
-      var cutDepth = null;
-
-      if (cut.cutDepthInch != null) {
-
-        cutDepth =
-          cut.cutDepthInch;
-
-      } else if (cut.cutDepth != null) {
-
-        cutDepth =
-          cut.cutDepth;
-
-      } else if (cut.miterDepthInch != null) {
-
-        cutDepth =
-          cut.miterDepthInch;
-
-      } else if (cut.miterDepth != null) {
-
-        cutDepth =
-          cut.miterDepth;
-
-      } else if (cut.depthCut != null) {
-
-        cutDepth =
-          cut.depthCut;
-
-      } else if (cut.cutDepthMM != null) {
-
-        cutDepth =
-          num(cut.cutDepthMM) / 25.4;
-      }
-
-
-      /* =====================================================
-         TYPE
-         ===================================================== */
-
-      var type =
-        cut.type ||
-        cut.cutType ||
-        cut.kind ||
-        "MITER CUT";
-
-      type =
-        String(type).toUpperCase();
-
-
-      /* =====================================================
-         REASON
-         ===================================================== */
-
-      var reason =
-        cut.reason ||
-        cut.description ||
-        cut.cause ||
-        "INTERFERENCE";
-
-
-      /* =====================================================
-         CARD START
-         ===================================================== */
-
-      html +=
-        '<div class="result-cut-card">';
-
-
-      /* =====================================================
-         TITLE
-         ===================================================== */
-
-      html +=
-        '<div class="result-cut-title">' +
-        "<strong>" +
-        esc(cutId) +
-        "</strong>" +
-        "</div>";
-
-
-      /* =====================================================
-         BODY
-         ===================================================== */
-
-      html +=
-        '<div class="result-cut-body">';
-
-
-      /* =====================================================
-         LENGTH SIDE
-         ===================================================== */
-
-      html +=
-        '<div class="cut-result-row">' +
-        "<span>Length side</span>" +
-        "<strong>";
-
-      if (lengthSize != null) {
-
-        html +=
-          inch(lengthSize) +
-          '"';
-
-      } else {
-
-        html +=
-          esc(lengthId);
-      }
-
-      html +=
-        "</strong>" +
-        "</div>";
-
-
-      /* =====================================================
-         DEPTH SIDE
-         ===================================================== */
-
-      html +=
-        '<div class="cut-result-row">' +
-        "<span>Depth side</span>" +
-        "<strong>";
-
-      if (depthSize != null) {
-
-        html +=
-          inch(depthSize) +
-          '"';
-
-      } else {
-
-        html +=
-          esc(depthId);
-      }
-
-      html +=
-        "</strong>" +
-        "</div>";
-
-
-      /* =====================================================
-         CUT ANGLE
-         ===================================================== */
-
-      html +=
-        '<div class="cut-result-row">' +
-        "<span>Cut angle</span>" +
-        "<strong>";
-
-      if (cutAngle != null) {
-
-        html +=
-          angle(cutAngle) +
-          "°";
-
-      } else {
-
-        html += "—";
-      }
-
-      html +=
-        "</strong>" +
-        "</div>";
-
-
-      /* =====================================================
-         CUT LENGTH
-         ===================================================== */
-
-      html +=
-        '<div class="cut-result-row">' +
-        "<span>Cut length</span>" +
-        "<strong>";
-
-      if (cutLength != null) {
-
-        html +=
-          inch(cutLength) +
-          '"';
-
-      } else {
-
-        html += "—";
-      }
-
-      html +=
-        "</strong>" +
-        "</div>";
-
-
-      /* =====================================================
-         CUT DEPTH
-         ===================================================== */
-
-      html +=
-        '<div class="cut-result-row">' +
-        "<span>Cut depth</span>" +
-        "<strong>";
-
-      if (cutDepth != null) {
-
-        html +=
-          inch(cutDepth) +
-          '"';
-
-      } else {
-
-        html += "—";
-      }
-
-      html +=
-        "</strong>" +
-        "</div>";
-
-
-      /* =====================================================
-         TYPE
-         ===================================================== */
-
-      html +=
-        '<div class="cut-result-row">' +
-        "<span>Type</span>" +
-        "<strong>" +
-        esc(type) +
-        "</strong>" +
-        "</div>";
-
-
-      /* =====================================================
-         REASON
-         ===================================================== */
-
-      html +=
-        '<div class="cut-result-row">' +
-        "<span>Reason</span>" +
-        "<strong>" +
-        esc(reason) +
-        "</strong>" +
-        "</div>";
-
-
-      /* =====================================================
-         CLOSE BODY / CARD
-         ===================================================== */
-
-      html += "</div>";
-      html += "</div>";
+      html += "</div></div>";
     });
 
     html += "</div>";
-
-
-    /* =======================================================
-       OUTPUT
-       ======================================================= */
-
-    setHTML(
-      "result-cuts",
-      html
-    );
-
-    setHTML(
-      "cup-cut-list",
-      html
-    );
-
-    setHTML(
-      "result-cup-cuts",
-      html
-    );
+    setAll(html);
   }
 
   /* =========================================================
@@ -995,7 +519,7 @@
 
     var cutCount =
       num(
-        t.cupCuts,
+        summary.cupCuts != null ? summary.cupCuts : t.cupCuts,
         summary.count != null
           ? summary.count
           : (
@@ -1052,6 +576,26 @@
 
     html += "</div>";
 
+
+    
+    /* V10: base + warnings bhi dikhao */
+    var base = data.base || {};
+    var baseTxt = [];
+    if (base.length && base.length.ids && base.length.ids.length) {
+      baseTxt.push("LENGTH base: " + base.length.ids.join("+") + (base.length.auto ? " (auto)" : ""));
+    }
+    if (base.depth && base.depth.ids && base.depth.ids.length) {
+      baseTxt.push("DEPTH base: " + base.depth.ids.join("+") + (base.depth.auto ? " (auto)" : ""));
+    }
+    if (baseTxt.length) {
+      html += '<div class="info-box" style="margin-top:8px;">' + esc(baseTxt.join("  ·  ")) + "</div>";
+    }
+
+    var warns = data.warnings || [];
+    if (warns.length) {
+      html += '<div class="base-hint" style="margin-top:8px;">' +
+        warns.map(function (w) { return "⚠ " + esc(w.message); }).join("<br>") + "</div>";
+    }
 
     setHTML(
       "result-summary",
