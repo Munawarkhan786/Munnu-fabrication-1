@@ -106,8 +106,12 @@
 
   function setupCanvasSize() {
     if (!canvas) { return; }
+    /* V10: pehle canvas apni purani px width pe atak jata tha (hidden tab me 800px).
+       Ab pehle 100% karke naap lete hain, to phone screen me fit rehta hai. */
+    canvas.style.width = "100%";
     var rect = canvas.getBoundingClientRect();
-    var width = Math.max(300, Math.floor(rect.width || canvas.clientWidth || 800));
+    var parentW = canvas.parentNode ? canvas.parentNode.clientWidth : 0;
+    var width = Math.max(300, Math.floor(rect.width || parentW || 800));
     var height = Math.max(250, Math.floor(rect.height || canvas.clientHeight || 500));
     var dpr = window.devicePixelRatio || 1;
     canvas.width = width * dpr;
@@ -319,6 +323,22 @@
   function drawCutSizes(cut, data) {
     var marks = cut.marks;
     if (!marks || !marks.polygons) { return; }
+
+    /* V10: seedha (BLOCK) cup cut ka size bhi dikhao (W x H) */
+    marks.polygons.forEach(function (poly) {
+      if (poly.kind !== "BLOCK") { return; }
+      var scr0 = poly.points.map(function (lab) {
+        var pp = (marks.points || []).filter(function (q) { return q.label === lab; })[0];
+        return pp ? w2s(pp.u.inch, pp.v.inch, data) : null;
+      }).filter(Boolean);
+      if (scr0.length < 3) { return; }
+      var gc = centroid(scr0);
+      var bw = Math.abs(Math.max.apply(null, scr0.map(function (q) { return q.x; })) -
+        Math.min.apply(null, scr0.map(function (q) { return q.x; })));
+      if (bw < 44) { return; }
+      pill(show(poly.width) + " × " + show(poly.height), gc.x, gc.y, "#ff5252");
+    });
+
     var angled = marks.polygons.some(function (poly) {
       return poly.kind === "WEDGE" || poly.kind === "TRIM";
     });
@@ -651,6 +671,10 @@
     ensureUnitButtons();
     bindButtons();
     setupCanvasSize();
+
+    /* canvas ki width badli (hidden tab -> visible) to dobara fit karo */
+    var cw = getCanvasSize().width;
+    if (view._cw !== cw) { view._cw = cw; view._fitted = false; }
 
     currentData = getMasterData();
 
