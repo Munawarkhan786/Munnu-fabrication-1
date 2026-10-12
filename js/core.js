@@ -134,7 +134,13 @@
       0.5,
 
     relief:
-      1.6
+      1.6,
+    allowanceMode:
+      "AS_ENTERED",
+    deduct90:
+      0.125,
+    doorGap:
+      0.1875
   };
 
 
@@ -502,7 +508,37 @@
         springback,
 
       relief:
-        relief
+        relief,
+
+      /* V10: pehle ye fields yahin gum ho jaati thi */
+      vDie:
+        vdie,
+
+      allowanceMode:
+        String(source.allowanceMode || source.shopMode || "").toUpperCase() === "SHOP"
+          ? "SHOP"
+          : "AS_ENTERED",
+
+      deduct90:
+        clampNumber(
+          source.deduct90 != null ? source.deduct90 : 0.125,
+          0,
+          2
+        ),
+
+      doorGap:
+        clampNumber(
+          source.doorGap != null ? source.doorGap : 0.1875,
+          0,
+          2
+        ),
+
+      deductTable:
+        source.deductTable &&
+        typeof source.deductTable === "object" &&
+        !Array.isArray(source.deductTable)
+          ? source.deductTable
+          : {}
     };
   }
 
