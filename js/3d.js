@@ -27,8 +27,7 @@
      WORKER SETUP — geometry ab server pe hai
      ========================================================= */
 
-  var WORKER_URL = 'https://munnu-fabrication-worker.munawarkhan487.workers.dev';
-  var API_KEY = 'munnu-secret-2026-xyz-987';
+  /* Worker URL/key: js/config.js (yahan nahi) */
 
 
   /* =========================================================
@@ -135,34 +134,11 @@
      MASTER DATA — Worker se fetch karo
      ========================================================= */
 
+  /* V10: 3D ab Worker ko alag se call NAHI karta.
+     main.js Calculate pe ek baar fetch karta hai, yahan wahi data milta hai. */
   async function getMasterData() {
-    try {
-      var state = getState();
-
-      var response = await fetch(WORKER_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': API_KEY
-        },
-        body: JSON.stringify({
-          settings: state.settings || window.settings || {},
-          lenLines: state.lenLines || [],
-          depLines: state.depLines || []
-        })
-      });
-
-      if (!response.ok) {
-        console.error('3D: Worker error', response.status);
-        return null;
-      }
-
-      masterData = await response.json();
-      return masterData;
-    } catch (err) {
-      console.error('3D: Fetch error', err);
-      return null;
-    }
+    masterData = window.currentGeometryData || null;
+    return masterData;
   }
 
 
