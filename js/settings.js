@@ -59,7 +59,10 @@
     radius: 0.8,
     kfactor: 0.44,
     springback: 0.5,
-    relief: 1.6
+    relief: 1.6,
+    allowanceMode: "AS_ENTERED",
+    deduct90: 0.125,
+    doorGap: 0.1875
   };
 
   var MATERIAL_K = {
@@ -77,6 +80,9 @@
   function getSpringbackInput() { return $("setSpringback"); }
   function getReliefInput() { return $("setRelief"); }
   function getCustomThicknessInput() { return $("customThick"); }
+  function getModeInput() { return $("setAllowanceMode"); }
+  function getDeduct90Input() { return $("setDeduct90"); }
+  function getDoorGapInput() { return $("setDoorGap"); }
 
   /* =======================================================
      SANITIZE
@@ -88,7 +94,7 @@
     var material = s.material === "SS202" ? "SS202" : "SS304";
 
     var thickness = parseFloat(s.thickness);
-    var vDie = parseFloat(s.vDie);
+    var vDie = parseFloat(s.vDie != null ? s.vDie : s.vdie);
     var radius = parseFloat(s.radius);
     var kfactor = parseFloat(s.kfactor);
     var springback = parseFloat(s.springback);
@@ -113,14 +119,31 @@
       relief = DEFAULTS.relief;
     }
 
+    var mode = String(s.allowanceMode || "").toUpperCase() === "SHOP" ? "SHOP" : "AS_ENTERED";
+    var deduct90 = parseFloat(s.deduct90);
+    var doorGap = parseFloat(s.doorGap);
+    if (!isFinite(deduct90) || deduct90 < 0) { deduct90 = DEFAULTS.deduct90; }
+    if (!isFinite(doorGap) || doorGap < 0) { doorGap = DEFAULTS.doorGap; }
+    deduct90 = Math.min(2, deduct90);
+    doorGap = Math.min(2, doorGap);
+
+    var table = s.deductTable && typeof s.deductTable === "object" && !Array.isArray(s.deductTable)
+      ? s.deductTable
+      : {};
+
     return {
       material: material,
       thickness: thickness,
       vDie: vDie,
+      vdie: vDie,
       radius: radius,
       kfactor: kfactor,
       springback: springback,
-      relief: relief
+      relief: relief,
+      allowanceMode: mode,
+      deduct90: deduct90,
+      doorGap: doorGap,
+      deductTable: table
     };
   }
 
@@ -187,7 +210,11 @@
         MATERIAL_K[material] || DEFAULTS.kfactor
       ),
       springback: numberFromElement(getSpringbackInput(), DEFAULTS.springback),
-      relief: numberFromElement(getReliefInput(), DEFAULTS.relief)
+      relief: numberFromElement(getReliefInput(), DEFAULTS.relief),
+      allowanceMode: getModeInput() ? getModeInput().value : state.allowanceMode,
+      deduct90: numberFromElement(getDeduct90Input(), DEFAULTS.deduct90),
+      doorGap: numberFromElement(getDoorGapInput(), DEFAULTS.doorGap),
+      deductTable: state.deductTable
     });
   }
 
@@ -207,6 +234,9 @@
     if (getKFactorInput()) { getKFactorInput().value = s.kfactor; }
     if (getSpringbackInput()) { getSpringbackInput().value = s.springback; }
     if (getReliefInput()) { getReliefInput().value = s.relief; }
+    if (getModeInput()) { getModeInput().value = s.allowanceMode; }
+    if (getDeduct90Input()) { getDeduct90Input().value = s.deduct90; }
+    if (getDoorGapInput()) { getDoorGapInput().value = s.doorGap; }
 
     var customThickness = getCustomThicknessInput();
 
